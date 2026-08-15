@@ -14,7 +14,8 @@ ABI break. Existing 0.1.x C and C++ callers must rebuild.
   slots `-1`) and returns a `Neighbours` view. It no longer returns
   `std::vector<std::vector<int>>`. Failure throws `linkcell::Error`.
 - Rust `Error::Empty` is an empty point list only. A wrong-length
-  `knearest_into` buffer is `Error::BufferSize`.
+  `knearest_into` buffer is `Error::BufferSize`. An overflowing
+  linked-cell mesh is `Error::TooManyCells`.
 
 ## 0.1.2
 
