@@ -478,6 +478,17 @@ fn mask_none_matches_all_ones() {
 }
 
 #[test]
+fn short_mask_is_mask_len() {
+    let b = Cell::ortho(10.0, 10.0, 10.0).unwrap();
+    let xyz = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]];
+    let mask = [true];
+    assert_eq!(
+        knearest(&xyz, &b, 1, Some(&mask), None).unwrap_err(),
+        Error::MaskLen
+    );
+}
+
+#[test]
 fn empty_xyz_is_empty_not_buffer() {
     let b = Cell::ortho(10.0, 10.0, 10.0).unwrap();
     assert_eq!(knearest(&[], &b, 1, None, None).unwrap_err(), Error::Empty);

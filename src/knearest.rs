@@ -171,6 +171,7 @@ pub struct Neighbors {
 ///
 /// `out` has length `n * k` ([`Error::BufferSize`] otherwise). Unused
 /// slots are `-1`. Neighbours of source `i` occupy `out[i * k ..]`.
+/// `mask` is `None` or length `n` ([`Error::MaskLen`] otherwise).
 ///
 /// ```
 /// use linkcell::{knearest_into, Cell};
@@ -193,7 +194,7 @@ pub fn knearest_into(
     out: &mut [i32],
 ) -> Result<(), Error> {
     let n = xyz.len();
-    if out.len() != n * k {
+    if n.checked_mul(k) != Some(out.len()) {
         return Err(Error::BufferSize);
     }
     out.fill(-1);
@@ -209,6 +210,7 @@ pub fn knearest_into(
 /// k-nearest neighbours of every point (or of the masked subset).
 ///
 /// `mask[i] == false` drops point `i` from both sources and candidates.
+/// `mask` is `None` or length `n` ([`Error::MaskLen`] otherwise).
 /// `cell_hint` is the target cell edge; `None` uses 3.0 in the same units
 /// as the box. Each row has `min(k, n_active - 1)` entries.
 ///
@@ -261,11 +263,13 @@ fn search(
         return Err(Error::Empty);
     }
     let n = xyz.len();
+    if let Some(m) = mask {
+        if m.len() != n {
+            return Err(Error::MaskLen);
+        }
+    }
     let active: Vec<usize> = (0..n)
-        .filter(|&i| {
-            mask.map(|m| m.get(i).copied().unwrap_or(false))
-                .unwrap_or(true)
-        })
+        .filter(|&i| mask.map(|m| m[i]).unwrap_or(true))
         .collect();
     if active.is_empty() {
         return Ok(Vec::new());

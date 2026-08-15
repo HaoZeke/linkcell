@@ -20,6 +20,15 @@ jobs:
           components: rustfmt
       - run: cargo fmt --check
 
+  header-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # Pin matches the version comment cbindgen writes into include/linkcell.h.
+      - run: cargo install cbindgen --version 0.29.4
+      - run: scripts/regen-capi-headers.sh --check
+
   cargo:
     strategy:
       fail-fast: false

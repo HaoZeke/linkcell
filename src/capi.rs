@@ -89,44 +89,31 @@ pub extern "C" fn lc_version() -> *const c_char {
 
 /// k-nearest neighbours for `n` points.
 ///
-/// # Arguments
-///
-/// - `xyz`: packed row-major `n` triples `(x, y, z)` (`n * 3` doubles).
-/// - `n`: point count (`size_t`). `0` is [`Error::Empty`].
-/// - `simbox`: periodic cell (lattice vectors a, b, c and origin).
-/// - `k`: neighbours per source (`size_t`). `0` is [`Error::ZeroK`].
-/// - `mask`: `NULL` includes every point; otherwise `n` ints, nonzero to
-///   include that point as both source and candidate.
-/// - `cell_hint`: target cell edge. Values `<= 0` select the default
-///   (3.0 in the box units).
-/// - `out_nn`: caller-owned output. Row-major `n * k` neighbour indices
-///   (`int`). Neighbours of source `i` occupy `out_nn[i*k .. i*k+k]`,
-///   nearest first. Missing slots are `-1`. Length is `n * k`.
-///
-/// # Null rules
+/// `xyz` is packed row-major `n` triples `(x, y, z)` (`n * 3` doubles).
+/// `n` is the point count (`size_t`); `0` is an error.
+/// `simbox` is the periodic cell (lattice vectors a, b, c and origin).
+/// `k` is neighbours per source (`size_t`); `0` is an error.
+/// `mask` of `NULL` includes every point; otherwise `n` ints, nonzero to
+/// include that point as both source and candidate.
+/// `cell_hint` is the target cell edge. Values `<= 0` select the default
+/// (3.0 in the box units).
+/// `out_nn` is caller-owned output. Neighbours of source `i` occupy
+/// `out_nn[i*k + t]`, nearest first. Missing slots are `-1`. Length is
+/// `n * k` ints.
 ///
 /// `xyz`, `simbox`, and `out_nn` must be non-null when `n > 0` and
 /// `k > 0`. `mask` may be `NULL`.
 ///
-/// # Buffer layout
+/// Returns `0` on success. Nonzero on failure. Read `lc_last_error()` on
+/// the same thread. The last-error string is thread-local: it is not
+/// shared across threads, is valid until the next `lc_*` call on this
+/// thread, and must not be freed.
 ///
-/// `out_nn` is row-major `n * k`. Unused / missing neighbour slots are
-/// the sentinel `-1`.
-///
-/// # Return
-///
-/// `0` on success. Nonzero on failure. Read [`lc_last_error`] on the
-/// same thread. The last-error string is thread-local: it is not shared
-/// across threads, is valid until the next `lc_*` call on this thread,
-/// and must not be freed.
-///
-/// # Safety
-///
-/// `xyz` is aligned for `f64` and readable for `n * 3` doubles.
-/// `simbox` is aligned and points at one valid [`lc_cell`].
+/// `xyz` is aligned for `double` and readable for `n * 3` doubles.
+/// `simbox` is aligned and points at one valid `lc_cell`.
 /// `out_nn` is aligned for `int` and writable for `n * k` ints.
 /// `mask`, if non-null, is aligned for `int` and readable for `n` ints.
-/// `n * 3` and `n * k` fit in `usize`.
+/// `n * 3` and `n * k` fit in `size_t`.
 #[no_mangle]
 pub unsafe extern "C" fn lc_knearest(
     xyz: *const f64,

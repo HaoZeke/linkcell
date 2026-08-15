@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### 0.2.1
+
+- `Error::MaskLen` when `mask` is `Some` and `mask.len() != n`.
+- CI checks `include/linkcell.h` against cbindgen 0.29.4.
+
 ### 0.2.0
 
 ABI break. Existing 0.1.x C and C++ callers must rebuild.
