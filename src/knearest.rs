@@ -18,6 +18,24 @@ use crate::Error;
 
 const MAX_CELLS: i64 = 16_777_216;
 
+fn pair_dist2(simbox: &Cell, p: [f64; 3], q: [f64; 3]) -> f64 {
+    if simbox.is_ortho() {
+        return simbox.dist2(p, q);
+    }
+    let mut best = f64::INFINITY;
+    for na in -1..=1 {
+        for nb in -1..=1 {
+            for nc in -1..=1 {
+                let d2 = simbox.dist2_shifted(p, q, simbox.lattice_shift(na, nb, nc));
+                if d2 < best {
+                    best = d2;
+                }
+            }
+        }
+    }
+    best
+}
+
 fn bins_1d(width: f64, edge: f64) -> Result<i32, Error> {
     let n = (width / edge).floor().max(1.0);
     if !n.is_finite() || n > 1_000_000.0 {
@@ -132,7 +150,7 @@ impl KHeap {
             };
             pairs.push((self.d2_at(t), j));
         }
-        pairs.sort_by(|a, b| a.0.total_cmp(&b.0));
+        pairs.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
         pairs
     }
 }
@@ -366,8 +384,10 @@ fn search(
 
 /// Brute-force k-nearest. Tests and small systems only.
 ///
-/// Uses [`Cell::dist2`] per pair (true MIC), not the fold-plus-shift
-/// walk. Linked-cell [`knearest`] must agree on the same neighbours.
+/// Orthorhombic boxes use [`Cell::dist2`]. Sheared boxes take the
+/// minimum over the 27 nearest lattice images: the single
+/// parallelepiped wrap is not the Wigner-Seitz cell of a 60-degree
+/// hex prism.
 ///
 /// ```
 /// use linkcell::{knearest, knearest_brute, Cell};
@@ -407,9 +427,9 @@ pub fn knearest_brute(
             .iter()
             .copied()
             .filter(|&j| j != i)
-            .map(|j| (simbox.dist2(xyz[i], xyz[j]), j))
+            .map(|j| (pair_dist2(simbox, xyz[i], xyz[j]), j))
             .collect();
-        pairs.sort_by(|a, b| a.0.total_cmp(&b.0));
+        pairs.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
         pairs.truncate(k);
         out[i].dist2 = pairs.iter().map(|p| p.0).collect();
         out[i].indices = pairs.iter().map(|p| p.1).collect();
