@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### 0.2.0
+
+ABI break. Existing 0.1.x C and C++ callers must rebuild.
+
+- `lc_knearest` takes `size_t n` and `size_t k`. The 0.1.x `int` counts
+  overflowed on large frames.
+- `lc_last_error` is thread-local. Concurrent searches no longer share
+  one process-wide slot. `lc_version` stays process-static.
+- C++ `linkcell::knearest` writes a packed `n * k` index buffer (unused
+  slots `-1`) and returns a `Neighbours` view. It no longer returns
+  `std::vector<std::vector<int>>`. Failure throws `linkcell::Error`.
+- Rust `Error::Empty` is an empty point list only. A wrong-length
+  `knearest_into` buffer is `Error::BufferSize`.
+
 ## 0.1.2
 
 Fold once, then Cartesian pair distances plus a lattice shift

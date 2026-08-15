@@ -1,13 +1,37 @@
 //! Periodic cell: three lattice vectors and a minimum-image convention.
 //!
-//! Orthorhombic boxes are the diagonal case. Triclinic (and any
-//! parallelepiped) use the same fractional wrap. Lattice vectors are
-//! stored as the columns of H, so r = H s. The C ABI and vesin pass
-//! rows (a, b, c); constructors accept either.
+//! Orthorhombic boxes are the diagonal case ([`Cell::ortho`]). Triclinic
+//! (and any parallelepiped) use the same fractional wrap. Lattice
+//! vectors are stored as the columns of H, so `r = H s`. The C ABI and
+//! vesin pass rows `(a, b, c)`; constructors accept either.
+//!
+//! After a fold into the primary cell, pair distances in the linked-cell
+//! walk are [`Cell::dist2_shifted`] plus [`Cell::lattice_shift`], not a
+//! per-pair wrap. [`Cell::is_ortho`] is the cheap path: three independent
+//! wraps and a scaled-diagonal shift, skipping the two 3x3 matvecs.
+//!
+//! [`Cell::dist2`] is the per-pair minimum image (brute-force reference
+//! and tests). The search itself does not call it.
 
 use crate::Error;
 
-/// Periodic parallelepiped.
+/// Periodic parallelepiped: columns of H, origin, and an ortho flag.
+///
+/// ```
+/// # use linkcell::Cell;
+/// # fn main() -> Result<(), linkcell::Error> {
+/// let cell = Cell::ortho(10.0, 11.0, 12.0)?;
+/// assert!(cell.is_ortho());
+/// let sheared = Cell::from_vectors(
+///     [10.0, 0.0, 0.0],
+///     [5.0, 8.66, 0.0],
+///     [0.0, 0.0, 10.0],
+///     [0.0, 0.0, 0.0],
+/// )?;
+/// assert!(!sheared.is_ortho());
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Cell {
     /// Columns of H: `h[0]` is lattice vector a.
@@ -23,21 +47,53 @@ pub struct Cell {
 
 impl Cell {
     /// Diagonal box with origin at zero.
+    ///
+    /// Sets [`Self::is_ortho`] so [`Self::dist2`] and
+    /// [`Self::lattice_shift`] skip the two 3x3 matvecs.
+    ///
+    /// ```
+    /// # use linkcell::Cell;
+    /// # fn main() -> Result<(), linkcell::Error> {
+    /// let cell = Cell::ortho(10.0, 10.0, 10.0)?;
+    /// assert!(cell.is_ortho());
+    /// assert_eq!(cell.widths(), [10.0, 10.0, 10.0]);
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn ortho(lx: f64, ly: f64, lz: f64) -> Result<Self, Error> {
-        Self::from_vectors([lx, 0.0, 0.0], [0.0, ly, 0.0], [0.0, 0.0, lz], [0.0, 0.0, 0.0])
+        Self::from_vectors(
+            [lx, 0.0, 0.0],
+            [0.0, ly, 0.0],
+            [0.0, 0.0, lz],
+            [0.0, 0.0, 0.0],
+        )
     }
 
     /// Diagonal box with an explicit dump-cell origin.
-    pub fn ortho_origin(
-        lx: f64,
-        ly: f64,
-        lz: f64,
-        origin: [f64; 3],
-    ) -> Result<Self, Error> {
+    ///
+    /// Same ortho path as [`Self::ortho`]: three independent wraps.
+    pub fn ortho_origin(lx: f64, ly: f64, lz: f64, origin: [f64; 3]) -> Result<Self, Error> {
         Self::from_vectors([lx, 0.0, 0.0], [0.0, ly, 0.0], [0.0, 0.0, lz], origin)
     }
 
-    /// Parallelepiped from lattice vectors a, b, c and an origin.
+    /// Parallelepiped from lattice vectors `a`, `b`, `c` and an origin.
+    ///
+    /// Vectors are the columns of H. A non-diagonal H clears
+    /// [`Self::is_ortho`].
+    ///
+    /// ```
+    /// # use linkcell::Cell;
+    /// # fn main() -> Result<(), linkcell::Error> {
+    /// let sheared = Cell::from_vectors(
+    ///     [10.0, 0.0, 0.0],
+    ///     [5.0, 8.66, 0.0],
+    ///     [0.0, 0.0, 10.0],
+    ///     [0.0, 0.0, 0.0],
+    /// )?;
+    /// assert!(!sheared.is_ortho());
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn from_vectors(
         a: [f64; 3],
         b: [f64; 3],
@@ -67,7 +123,8 @@ impl Cell {
         })
     }
 
-    /// True when H is diagonal. Distances then skip the two matvecs.
+    /// True when H is diagonal. Distances and lattice shifts then skip
+    /// the two 3x3 matvecs and use three independent wraps.
     pub fn is_ortho(&self) -> bool {
         self.ortho
     }
@@ -97,7 +154,24 @@ impl Cell {
         self.widths
     }
 
-    /// Fractional coordinates in [0, 1).
+    /// Fractional coordinates in `[0, 1)`.
+    ///
+    /// Orthorhombic boxes divide by the three widths. The general path
+    /// is `s = Hinv (r - origin)`, then wrap.
+    ///
+    /// ```
+    /// # use linkcell::Cell;
+    /// # fn main() -> Result<(), linkcell::Error> {
+    /// let cell = Cell::ortho(10.0, 10.0, 10.0)?;
+    /// let s = cell.fractional([10.5, -1.0, 3.0]);
+    /// assert!((s[0] - 0.05).abs() < 1e-12);
+    /// assert!((s[1] - 0.90).abs() < 1e-12);
+    /// assert!((s[2] - 0.30).abs() < 1e-12);
+    /// let back = cell.cartesian(s);
+    /// assert!((back[0] - 0.5).abs() < 1e-12);
+    /// # Ok(())
+    /// # }
+    /// ```
     #[inline]
     pub fn fractional(&self, r: [f64; 3]) -> [f64; 3] {
         if self.ortho {
@@ -119,7 +193,9 @@ impl Cell {
         s
     }
 
-    /// Cartesian from fractional.
+    /// Cartesian from fractional: `r = H s + origin`.
+    ///
+    /// The inverse of [`Self::fractional`] after a wrap into `[0, 1)`.
     #[inline]
     pub fn cartesian(&self, s: [f64; 3]) -> [f64; 3] {
         let r = mul(self.h, s);
@@ -130,9 +206,23 @@ impl Cell {
         ]
     }
 
-    /// Cartesian translation by integer lattice counts (na, nb, nc).
-    /// vesin and LAMMPS add this shift once per neighbour cell so the
-    /// pair loop is a plain subtract, not a minimum-image wrap.
+    /// Cartesian translation by integer lattice counts `(na, nb, nc)`.
+    ///
+    /// vesin and LAMMPS add this shift once per neighbour stencil so the
+    /// pair loop is a plain subtract, not a minimum-image wrap. The
+    /// linked-cell walk does the same after folding: one shift per
+    /// `(jx, jy, jz)`, not one shift per unique rem_euclid cell.
+    /// Orthorhombic boxes scale the three widths; the general path is
+    /// `na a + nb b + nc c`.
+    ///
+    /// ```
+    /// # use linkcell::Cell;
+    /// # fn main() -> Result<(), linkcell::Error> {
+    /// let cell = Cell::ortho(10.0, 10.0, 10.0)?;
+    /// assert_eq!(cell.lattice_shift(-1, 0, 0), [-10.0, 0.0, 0.0]);
+    /// # Ok(())
+    /// # }
+    /// ```
     #[inline]
     pub fn lattice_shift(&self, na: i32, nb: i32, nc: i32) -> [f64; 3] {
         if self.ortho {
@@ -157,6 +247,24 @@ impl Cell {
     }
 
     /// Squared Cartesian distance after applying a lattice shift to `q`.
+    ///
+    /// This is not a minimum-image wrap. The caller supplies the image
+    /// via [`Self::lattice_shift`]. After folding, the linked-cell walk
+    /// uses this so the pair loop is `q + shift - p`.
+    ///
+    /// ```
+    /// # use linkcell::Cell;
+    /// # fn main() -> Result<(), linkcell::Error> {
+    /// let cell = Cell::ortho(10.0, 10.0, 10.0)?;
+    /// let left = [0.2, 0.0, 0.0];
+    /// let right = [9.4, 0.0, 0.0];
+    /// let mic = cell.dist2(left, right);
+    /// let via = cell.dist2_shifted(left, right, cell.lattice_shift(-1, 0, 0));
+    /// assert!((via - mic).abs() < 1e-12);
+    /// assert!((mic - 0.64).abs() < 1e-12);
+    /// # Ok(())
+    /// # }
+    /// ```
     #[inline]
     pub fn dist2_shifted(&self, p: [f64; 3], q: [f64; 3], shift: [f64; 3]) -> f64 {
         let dx = q[0] + shift[0] - p[0];
@@ -166,6 +274,10 @@ impl Cell {
     }
 
     /// Squared minimum-image distance.
+    ///
+    /// Orthorhombic boxes wrap each axis independently. The general path
+    /// is `ds = wrap(Hinv (q - p))`, then `dr = H ds`. [`knearest`](crate::knearest)
+    /// does not call this; it folds once and uses [`Self::dist2_shifted`].
     #[inline]
     pub fn dist2(&self, p: [f64; 3], q: [f64; 3]) -> f64 {
         if self.ortho {
@@ -244,15 +356,14 @@ fn invert_columns(h: [[f64; 3]; 3]) -> Option<([[f64; 3]; 3], f64)> {
     let a = h[0];
     let b = h[1];
     let c = h[2];
-    let det = a[0] * (b[1] * c[2] - b[2] * c[1])
-        - a[1] * (b[0] * c[2] - b[2] * c[0])
+    let det = a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0])
         + a[2] * (b[0] * c[1] - b[1] * c[0]);
     if !det.is_finite() || det.abs() < 1e-18 {
         return None;
     }
     let invdet = 1.0 / det;
     // Inverse of [a b c]: rows are (b x c, c x a, a x b) / det,
-    // so columns of Hinv are those divided by det... 
+    // so columns of Hinv are those divided by det...
     // Hinv_{ij} such that Hinv * H = I.
     // Cofactor transpose / det.
     let inv = [
@@ -292,10 +403,7 @@ mod tests {
         let near = [1.0, 2.0, 3.0];
         let far = [2.0, 3.0, 4.0];
         let zero = [0.0, 0.0, 0.0];
-        assert!(
-            (b.dist2_shifted(near, far, zero) - b.dist2(near, far)).abs()
-                <= 1e-12
-        );
+        assert!((b.dist2_shifted(near, far, zero) - b.dist2(near, far)).abs() <= 1e-12);
         let left = [0.2, 0.0, 0.0];
         let right = [9.4, 0.0, 0.0];
         let mic = b.dist2(left, right);

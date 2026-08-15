@@ -1,10 +1,12 @@
 //! C ABI. Prefix `lc_`. Caller owns every buffer.
 
+#![deny(unsafe_op_in_unsafe_fn)]
+
+use std::cell::RefCell;
 use std::ffi::{c_char, c_int, CString};
 use std::ptr;
-use std::sync::Mutex;
 
-use crate::Cell;
+use crate::{Cell, Error};
 
 /// Periodic parallelepiped. Lattice vectors are a, b, c (same as vesin rows).
 #[repr(C)]
@@ -36,27 +38,50 @@ pub struct lc_cell {
     pub oz: f64,
 }
 
-static LAST_ERROR: Mutex<Option<CString>> = Mutex::new(None);
+thread_local! {
+    static LAST_ERROR: RefCell<Option<CString>> = RefCell::new(None);
+}
 
 fn set_error(msg: &str) {
-    if let Ok(mut slot) = LAST_ERROR.lock() {
-        *slot = CString::new(msg).ok();
-    }
+    LAST_ERROR.with(|slot| {
+        *slot.borrow_mut() = CString::new(msg).ok();
+    });
 }
 
-/// Process-static last error. Do not free. NULL if the last call succeeded.
+fn clear_error() {
+    LAST_ERROR.with(|slot| {
+        *slot.borrow_mut() = None;
+    });
+}
+
+fn fail(err: Error) -> c_int {
+    set_error(&err.to_string());
+    1
+}
+
+fn fail_msg(msg: &str) -> c_int {
+    set_error(msg);
+    1
+}
+
+/// Thread-local last-error string from this thread's most recent `lc_*` call.
+///
+/// Returns a pointer to a NUL-terminated UTF-8 C string, or `NULL` if the
+/// last call on this thread succeeded (or no call has failed yet).
+/// The string is thread-local: distinct threads have independent slots.
+/// The pointer is valid until the next `lc_*` call on this thread.
+/// Do not free it.
 #[no_mangle]
 pub extern "C" fn lc_last_error() -> *const c_char {
-    match LAST_ERROR.lock() {
-        Ok(slot) => slot
+    LAST_ERROR.with(|slot| {
+        slot.borrow()
             .as_ref()
             .map(|s| s.as_ptr())
-            .unwrap_or(ptr::null()),
-        Err(_) => ptr::null(),
-    }
+            .unwrap_or(ptr::null())
+    })
 }
 
-/// Library version string. Process-static. Do not free.
+/// Library version string. Process-static, NUL-terminated. Do not free.
 #[no_mangle]
 pub extern "C" fn lc_version() -> *const c_char {
     concat!(env!("CARGO_PKG_VERSION"), "\0").as_ptr() as *const c_char
@@ -64,36 +89,68 @@ pub extern "C" fn lc_version() -> *const c_char {
 
 /// k-nearest neighbours for `n` points.
 ///
-/// `xyz` is `n` packed xyz triples. `mask` is NULL (all points) or `n`
-/// ints, nonzero to include. `cell_hint <= 0` selects the default edge.
-/// `out_nn` is caller-owned, length `n * k`; unused slots are `-1`.
+/// # Arguments
 ///
-/// Returns 0 on success, nonzero on failure. Read [`lc_last_error`].
+/// - `xyz`: packed row-major `n` triples `(x, y, z)` (`n * 3` doubles).
+/// - `n`: point count (`size_t`). `0` is [`Error::Empty`].
+/// - `simbox`: periodic cell (lattice vectors a, b, c and origin).
+/// - `k`: neighbours per source (`size_t`). `0` is [`Error::ZeroK`].
+/// - `mask`: `NULL` includes every point; otherwise `n` ints, nonzero to
+///   include that point as both source and candidate.
+/// - `cell_hint`: target cell edge. Values `<= 0` select the default
+///   (3.0 in the box units).
+/// - `out_nn`: caller-owned output. Row-major `n * k` neighbour indices
+///   (`int`). Neighbours of source `i` occupy `out_nn[i*k .. i*k+k]`,
+///   nearest first. Missing slots are `-1`. Length is `n * k`.
+///
+/// # Null rules
+///
+/// `xyz`, `simbox`, and `out_nn` must be non-null when `n > 0` and
+/// `k > 0`. `mask` may be `NULL`.
+///
+/// # Buffer layout
+///
+/// `out_nn` is row-major `n * k`. Unused / missing neighbour slots are
+/// the sentinel `-1`.
+///
+/// # Return
+///
+/// `0` on success. Nonzero on failure. Read [`lc_last_error`] on the
+/// same thread. The last-error string is thread-local: it is not shared
+/// across threads, is valid until the next `lc_*` call on this thread,
+/// and must not be freed.
+///
+/// # Safety
+///
+/// `xyz` is aligned for `f64` and readable for `n * 3` doubles.
+/// `simbox` is aligned and points at one valid [`lc_cell`].
+/// `out_nn` is aligned for `int` and writable for `n * k` ints.
+/// `mask`, if non-null, is aligned for `int` and readable for `n` ints.
+/// `n * 3` and `n * k` fit in `usize`.
 #[no_mangle]
 pub unsafe extern "C" fn lc_knearest(
     xyz: *const f64,
-    n: c_int,
+    n: usize,
     simbox: *const lc_cell,
-    k: c_int,
+    k: usize,
     mask: *const c_int,
     cell_hint: f64,
     out_nn: *mut c_int,
 ) -> c_int {
+    if n == 0 {
+        return fail(Error::Empty);
+    }
+    if k == 0 {
+        return fail(Error::ZeroK);
+    }
     if xyz.is_null() || simbox.is_null() || out_nn.is_null() {
-        set_error("null pointer");
-        return 1;
+        return fail_msg("null pointer");
     }
-    if n <= 0 {
-        set_error("no points");
-        return 1;
-    }
-    if k <= 0 {
-        set_error("k must be at least 1");
-        return 1;
-    }
-    let n_us = n as usize;
-    let k_us = k as usize;
-    let box_c = *simbox;
+    let Some(need) = n.checked_mul(k) else {
+        return fail(Error::BufferSize);
+    };
+    // SAFETY: simbox is non-null, aligned, and points at one valid lc_cell.
+    let box_c = unsafe { *simbox };
     let sim = match Cell::from_vectors(
         [box_c.ax, box_c.ay, box_c.az],
         [box_c.bx, box_c.by, box_c.bz],
@@ -106,32 +163,28 @@ pub unsafe extern "C" fn lc_knearest(
             return 1;
         }
     };
-    // Packed xyz is already [[f64; 3]; n] in memory. Copying it was
-    // the extra tax on every d-SEAMS call.
-    let pts: &[[f64; 3]] = std::slice::from_raw_parts(xyz.cast::<[f64; 3]>(), n_us);
+    // SAFETY: xyz is non-null, 8-byte aligned, and readable for n packed
+    // xyz triples (n * 3 f64s). [f64; 3] has the same alignment as f64.
+    let pts: &[[f64; 3]] = unsafe { std::slice::from_raw_parts(xyz.cast::<[f64; 3]>(), n) };
     let mask_vec: Option<Vec<bool>> = if mask.is_null() {
         None
     } else {
-        Some(
-            std::slice::from_raw_parts(mask, n_us)
-                .iter()
-                .map(|&v| v != 0)
-                .collect(),
-        )
+        // SAFETY: mask is non-null, aligned for int, and readable for n ints.
+        let raw = unsafe { std::slice::from_raw_parts(mask, n) };
+        Some(raw.iter().map(|&v| v != 0).collect())
     };
     let hint = if cell_hint > 0.0 {
         Some(cell_hint)
     } else {
         None
     };
-    let out = std::slice::from_raw_parts_mut(out_nn, n_us * k_us);
-    if let Err(e) = crate::knearest_into(&pts, &sim, k_us, mask_vec.as_deref(), hint, out)
-    {
+    // SAFETY: out_nn is non-null, aligned for int, and writable for
+    // n*k ints. n*k fits in usize.
+    let out = unsafe { std::slice::from_raw_parts_mut(out_nn, need) };
+    if let Err(e) = crate::knearest_into(pts, &sim, k, mask_vec.as_deref(), hint, out) {
         set_error(&e.to_string());
         return 1;
     }
-    if let Ok(mut slot) = LAST_ERROR.lock() {
-        *slot = None;
-    }
+    clear_error();
     0
 }

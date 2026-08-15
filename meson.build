@@ -1,7 +1,8 @@
 project(
   'linkcell',
   ['c', 'cpp'],
-  version: '0.1.2',
+  # Keep in lockstep with Cargo.toml [package].version (source of truth).
+  version: '0.2.0',
   meson_version: '>=1.2.0',
   license: 'MIT',
   default_options: [
@@ -17,13 +18,21 @@ cargo_prog = find_program('cargo', required: true)
 py = find_program('python3', 'python')
 _install = not meson.is_subproject()
 _msproot = meson.project_source_root()
+_mbproot = meson.project_build_root()
 
 if host_machine.system() == 'windows'
-  cargo_lib_name = 'linkcell.lib'
+  cargo_shared = 'linkcell.dll'
+  cargo_static = 'linkcell.lib'
 else
-  cargo_lib_name = 'liblinkcell.a'
+  _so = host_machine.system() == 'darwin' ? '.dylib' : '.so'
+  cargo_shared = 'liblinkcell' + _so
+  cargo_static = 'liblinkcell.a'
 endif
 
+_profile = get_option('buildtype') == 'debug' ? 'debug' : 'release'
+
+# cargo rustc emits both crate types; the target lists both so Meson
+# does not pretend the static archive is the only artifact.
 linkcell_cargo = custom_target(
   'linkcell-cargo',
   input: files(
@@ -35,17 +44,33 @@ linkcell_cargo = custom_target(
     'src/error.rs',
     'src/capi.rs',
   ),
-  output: cargo_lib_name,
+  output: [cargo_shared, cargo_static],
   command: [
     py, '-c',
-    'import subprocess, shutil, sys; ' +
-    'subprocess.check_call([sys.argv[1], "build", "--release", "--features", "capi", "--manifest-path", sys.argv[2], "--target-dir", sys.argv[3] + "/cargo-target"]); ' +
-    'shutil.copy2(sys.argv[3] + "/cargo-target/release/" + sys.argv[4], sys.argv[5])',
-    cargo_prog.full_path(), '@INPUT0@', '@PRIVATE_DIR@', cargo_lib_name, '@OUTPUT0@',
+    'import shutil, subprocess, sys; from pathlib import Path; ' +
+    'cargo, src, target, profile, shared, archive, out_s, out_a = sys.argv[1:9]; ' +
+    'cmd = [cargo, "rustc", "--lib", "--manifest-path", str(Path(src) / "Cargo.toml"), ' +
+    '"--target-dir", target, "--features", "capi"]; ' +
+    'Path(src, "Cargo.lock").is_file() and cmd.append("--locked"); ' +
+    'profile == "release" and cmd.append("--release"); ' +
+    'rustc = ["--crate-type=cdylib", "--crate-type=staticlib"]; ' +
+    'sys.platform.startswith("linux") and rustc.append("-Clink-arg=-Wl,-soname," + shared); ' +
+    'sys.platform == "darwin" and rustc.append("-Clink-arg=-Wl,-install_name," + chr(64) + "rpath/" + shared); ' +
+    'cmd.extend(["--"] + rustc); subprocess.check_call(cmd); ' +
+    'built = Path(target) / profile; ' +
+    'shutil.copy2(built / shared, out_s); shutil.copy2(built / archive, out_a)',
+    cargo_prog.full_path(),
+    _msproot,
+    _mbproot / 'cargo-target',
+    _profile,
+    cargo_shared,
+    cargo_static,
+    '@OUTPUT0@',
+    '@OUTPUT1@',
   ],
   build_by_default: true,
   install: _install,
-  install_dir: get_option('libdir'),
+  install_dir: [get_option('libdir'), get_option('libdir')],
 )
 
 rust_sys = [dependency('threads')]
@@ -67,23 +92,29 @@ endif
 
 # link_args rather than link_with: Meson promotes installed static
 # consumers to link_whole, and link_whole rejects custom_targets.
+_link_idx = get_option('default_library') == 'static' ? 1 : 0
 linkcell_dep = declare_dependency(
-  link_args: [linkcell_cargo.full_path()],
+  link_args: [linkcell_cargo[_link_idx].full_path()],
   sources: linkcell_cargo,
   include_directories: include_directories('include'),
   dependencies: rust_sys,
+  version: meson.project_version(),
 )
+meson.override_dependency('linkcell', linkcell_dep)
 
 if _install
   install_headers('include/linkcell.h', 'include/linkcell.hpp')
   pkg = import('pkgconfig')
   pkg.generate(
-    libraries: [linkcell_cargo] + rust_sys,
     name: 'linkcell',
     filebase: 'linkcell',
     description: 'Periodic linked-cell k-nearest neighbour search',
     version: meson.project_version(),
     url: 'https://github.com/HaoZeke/linkcell',
+    # Raw `-lfoo` does not get `-L${libdir}`; wrap consumers then fail
+    # at link with "cannot find -llinkcell".
+    libraries: ['-L${libdir}', '-llinkcell'],
+    libraries_private: rust_sys,
     subdirs: '.',
   )
 endif

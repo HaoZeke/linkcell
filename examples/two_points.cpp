@@ -1,16 +1,47 @@
 #include "linkcell.hpp"
 
+#include <cstddef>
+#include <exception>
 #include <iostream>
 
+// Neighbours of source i sit at out[i * k + j]. Unused slots are -1.
+static int run(const char *label, const double *xyz, std::size_t n,
+               const linkcell::Cell &box, std::size_t k, int *out) {
+  const linkcell::Neighbours nn = linkcell::knearest(xyz, n, box, k, out);
+  std::cout << label << "\n";
+  for (std::size_t i = 0; i < n; ++i) {
+    std::cout << i << " ->";
+    for (std::size_t t = 0; t < k; ++t) {
+      const int j = nn.neighbour(i, t);
+      if (t == 0 && j < 0) {
+        std::cerr << "unexpected neighbour rows\n";
+        return 1;
+      }
+      std::cout << " " << j;
+    }
+    std::cout << "\n";
+  }
+  return 0;
+}
+
 int main() {
-  const linkcell::Cell box = linkcell::Cell::ortho(10.0, 10.0, 10.0);
-  const std::vector<std::array<double, 3>> xyz{{0.0, 0.0, 0.0},
-                                               {1.0, 0.0, 0.0}};
-  const auto rows = linkcell::knearest(xyz, box, 1);
-  if (rows.size() != 2 || rows[0].empty() || rows[1].empty()) {
-    std::cerr << "unexpected neighbour rows\n";
+  const double xyz[] = {0.0, 0.0, 0.0, 1.0, 0.0, 0.0};
+  const std::size_t n = 2;
+  const std::size_t k = 1;
+  const linkcell::Cell ortho = linkcell::Cell::ortho(10.0, 10.0, 10.0);
+  const linkcell::Cell sheared = linkcell::Cell::from_vectors(
+      {10.0, 0.0, 0.0}, {5.0, 8.66, 0.0}, {0.0, 0.0, 10.0});
+
+  try {
+    int out_ortho[2];
+    int out_sheared[2];
+    if (run("ortho", xyz, n, ortho, k, out_ortho) != 0 ||
+        run("sheared", xyz, n, sheared, k, out_sheared) != 0) {
+      return 1;
+    }
+  } catch (const std::exception &e) {
+    std::cerr << e.what() << "\n";
     return 1;
   }
-  std::cout << "0 -> " << rows[0][0] << "\n1 -> " << rows[1][0] << "\n";
   return 0;
 }

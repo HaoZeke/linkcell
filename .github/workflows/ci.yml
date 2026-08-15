@@ -6,19 +6,61 @@ on:
     tags: ['v*']
   pull_request:
 
+# windows-latest omitted: meson/cmake wrap cargo via custom_target that
+# copies cargo-target/release/<lib> with POSIX path joins, and the
+# cdylib + cbindgen install layout is unix-shaped.
+
 jobs:
-  cargo:
+  fmt:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test --locked
+        with:
+          components: rustfmt
+      - run: cargo fmt --check
+
+  cargo:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        crate:
+          - name: default
+            flags: ""
+          - name: serial
+            flags: --no-default-features --features capi
+    name: cargo (${{ matrix.os }}, ${{ matrix.crate.name }})
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+      - run: cargo test --locked ${{ matrix.crate.flags }}
+      - run: cargo clippy --locked --all-targets ${{ matrix.crate.flags }} -- -D warnings
 
   meson:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -38,12 +80,23 @@ jobs:
           test -f "$prefix/include/linkcell.hpp"
           test -f "$prefix/lib/x86_64-linux-gnu/liblinkcell.a" \
             -o -f "$prefix/lib/liblinkcell.a"
+          test -f "$prefix/lib/x86_64-linux-gnu/liblinkcell.so" \
+            -o -f "$prefix/lib/liblinkcell.so" \
+            -o -f "$prefix/lib/liblinkcell.dylib"
 
   cmake:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
       - run: cmake -S . -B build -DCMAKE_INSTALL_PREFIX="$PWD/prefix"
       - run: cmake --build build
       - run: ctest --test-dir build --output-on-failure
@@ -52,6 +105,7 @@ jobs:
         run: |
           test -f prefix/include/linkcell.h
           test -f prefix/lib/liblinkcell.a
+          test -f prefix/lib/liblinkcell.so -o -f prefix/lib/liblinkcell.dylib
           test -f prefix/lib/pkgconfig/linkcell.pc
           test -f prefix/lib/cmake/linkcell/linkcellConfig.cmake
           export PKG_CONFIG_PATH="$PWD/prefix/lib/pkgconfig"
@@ -61,4 +115,6 @@ jobs:
             -DCMAKE_PREFIX_PATH="$PWD/prefix" \
             -DLINKCELL_EXAMPLE="$PWD/examples/two_points.cpp"
           cmake --build find-build
+          export LD_LIBRARY_PATH="$PWD/prefix/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          export DYLD_LIBRARY_PATH="$PWD/prefix/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
           ./find-build/find_lc

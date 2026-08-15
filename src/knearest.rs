@@ -1,10 +1,24 @@
 //! Linked-cell k-nearest search (Allen and Tildesley).
+//!
+//! Fold into the primary cell, bin on the fractional mesh, then expand
+//! Chebyshev shells until the k-th neighbour cannot sit outside the
+//! visited cube. Distances are [`crate::Cell::dist2_shifted`] plus
+//! [`crate::Cell::lattice_shift`]. The walk keys on the integer stencil,
+//! not a unique-cell stamp: occupants of one bin can need different
+//! lattice images of the same source.
+//!
+//! [`knearest`] returns one [`Neighbors`] row per point. [`knearest_into`]
+//! writes a packed `n * k` index buffer (`-1` unused). Sources run under
+//! rayon when the `parallel` feature is on (the default); build with
+//! `--no-default-features` to serialize. The per-source `KHeap` stays on
+//! the stack for `k <= 16`.
 
 use crate::cell::Cell;
 use crate::Error;
 
-/// Bounded max-heap of (dist2, index). k is 4 in ice; the small
-/// case stays on the stack so the pair loop does not allocate.
+/// Bounded max-heap of `(dist2, index)`. `k <= 16` stays in
+/// `[f64; 16]` / `[usize; 16]` so the pair loop does not allocate;
+/// larger `k` uses `extra_*` vectors.
 struct KHeap {
     d2: [f64; 16],
     idx: [usize; 16],
@@ -98,6 +112,9 @@ impl KHeap {
 }
 
 /// One source's k nearest neighbours, nearest first.
+///
+/// Empty `indices` / `dist2` when the point is masked or isolated.
+/// Length is `min(k, n_active - 1)` for an active source.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Neighbors {
     /// Candidate indices into the input point list.
@@ -107,7 +124,22 @@ pub struct Neighbors {
 }
 
 /// Write k-nearest indices, nearest first, into caller storage.
-/// `out` has length `n * k`. Unused slots are `-1`.
+///
+/// `out` has length `n * k` ([`Error::BufferSize`] otherwise). Unused
+/// slots are `-1`. Neighbours of source `i` occupy `out[i * k ..]`.
+///
+/// ```
+/// use linkcell::{knearest_into, Cell};
+///
+/// # fn main() -> Result<(), linkcell::Error> {
+/// let sim = Cell::ortho(10.0, 10.0, 10.0)?;
+/// let xyz = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]];
+/// let mut out = [0; 4];
+/// knearest_into(&xyz, &sim, 2, None, None, &mut out)?;
+/// assert_eq!(out, [1, -1, 0, -1]);
+/// # Ok(())
+/// # }
+/// ```
 pub fn knearest_into(
     xyz: &[[f64; 3]],
     simbox: &Cell,
@@ -118,7 +150,7 @@ pub fn knearest_into(
 ) -> Result<(), Error> {
     let n = xyz.len();
     if out.len() != n * k {
-        return Err(Error::Empty);
+        return Err(Error::BufferSize);
     }
     out.fill(-1);
     let rows = search(xyz, simbox, k, mask, cell_hint)?;
@@ -135,6 +167,26 @@ pub fn knearest_into(
 /// `mask[i] == false` drops point `i` from both sources and candidates.
 /// `cell_hint` is the target cell edge; `None` uses 3.0 in the same units
 /// as the box. Each row has `min(k, n_active - 1)` entries.
+///
+/// Fold, bin, then expand Chebyshev shells. Distances are
+/// [`Cell::dist2_shifted`] plus [`Cell::lattice_shift`]. The walk does
+/// not stamp unique cells: occupants of one bin can need different
+/// images.
+///
+/// ```
+/// use linkcell::{knearest, Cell};
+///
+/// # fn main() -> Result<(), linkcell::Error> {
+/// let sim = Cell::ortho(10.0, 10.0, 10.0)?;
+/// let xyz = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
+/// let mask = [true, false, true];
+/// let rows = knearest(&xyz, &sim, 1, Some(&mask), None)?;
+/// assert!(rows[1].indices.is_empty());
+/// assert_eq!(rows[0].indices, vec![2]);
+/// assert_eq!(rows[2].indices, vec![0]);
+/// # Ok(())
+/// # }
+/// ```
 pub fn knearest(
     xyz: &[[f64; 3]],
     simbox: &Cell,
@@ -166,7 +218,10 @@ fn search(
     }
     let n = xyz.len();
     let active: Vec<usize> = (0..n)
-        .filter(|&i| mask.map(|m| m.get(i).copied().unwrap_or(false)).unwrap_or(true))
+        .filter(|&i| {
+            mask.map(|m| m.get(i).copied().unwrap_or(false))
+                .unwrap_or(true)
+        })
         .collect();
     if active.is_empty() {
         return Ok(Vec::new());
@@ -192,6 +247,8 @@ fn search(
 
     // Fold into the primary cell once. Pair distances are then a
     // Cartesian subtract plus a lattice shift (vesin / LAMMPS ghosts).
+    // The walk keys on the integer stencil, not a unique rem_euclid
+    // cell: occupants of one bin can need different images.
     let mut folded = vec![[0.0; 3]; n];
     let mut bin = vec![(0i32, 0i32, 0i32); n];
     for &i in &active {
@@ -248,10 +305,7 @@ fn search(
                         while j >= 0 {
                             let ju = j as usize;
                             if ju != i {
-                                heap.push(
-                                    simbox.dist2_shifted(folded[i], folded[ju], shift),
-                                    ju,
-                                );
+                                heap.push(simbox.dist2_shifted(folded[i], folded[ju], shift), ju);
                             }
                             j = next[ju];
                         }
@@ -281,6 +335,23 @@ fn search(
 }
 
 /// Brute-force k-nearest. Tests and small systems only.
+///
+/// Uses [`Cell::dist2`] per pair (true MIC), not the fold-plus-shift
+/// walk. Linked-cell [`knearest`] must agree on the same neighbours.
+///
+/// ```
+/// use linkcell::{knearest, knearest_brute, Cell};
+///
+/// # fn main() -> Result<(), linkcell::Error> {
+/// let sim = Cell::ortho(10.0, 10.0, 10.0)?;
+/// let xyz = [[0.2, 0.0, 0.0], [9.4, 0.0, 0.0]];
+/// let cell = knearest(&xyz, &sim, 1, None, None)?;
+/// let brute = knearest_brute(&xyz, &sim, 1, None)?;
+/// assert_eq!(cell[0].indices, brute[0].indices);
+/// assert!((cell[0].dist2[0] - brute[0].dist2[0]).abs() < 1e-12);
+/// # Ok(())
+/// # }
+/// ```
 pub fn knearest_brute(
     xyz: &[[f64; 3]],
     simbox: &Cell,
@@ -295,7 +366,10 @@ pub fn knearest_brute(
     }
     let n = xyz.len();
     let active: Vec<usize> = (0..n)
-        .filter(|&i| mask.map(|m| m.get(i).copied().unwrap_or(false)).unwrap_or(true))
+        .filter(|&i| {
+            mask.map(|m| m.get(i).copied().unwrap_or(false))
+                .unwrap_or(true)
+        })
         .collect();
     let mut out = vec![Neighbors::default(); n];
     for &i in &active {

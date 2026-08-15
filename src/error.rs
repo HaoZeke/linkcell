@@ -7,10 +7,12 @@ use std::fmt;
 pub enum Error {
     /// `k == 0`.
     ZeroK,
-    /// A box length is not strictly positive.
+    /// A box length is not strictly positive, or H is singular.
     BadBox,
-    /// `xyz` is empty.
+    /// `n == 0` or the point list is empty. Not a buffer-size mismatch.
     Empty,
+    /// Caller `out` length is not `n * k`.
+    BufferSize,
 }
 
 impl fmt::Display for Error {
@@ -19,6 +21,7 @@ impl fmt::Display for Error {
             Error::ZeroK => write!(f, "k must be at least 1"),
             Error::BadBox => write!(f, "box lengths must be positive"),
             Error::Empty => write!(f, "no points"),
+            Error::BufferSize => write!(f, "out buffer length must be n * k"),
         }
     }
 }

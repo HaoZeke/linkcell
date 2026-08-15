@@ -5,22 +5,53 @@
 #error "linkcell.hpp requires C++17 or later"
 #endif
 
+extern "C" {
 #include "linkcell.h"
+}
 
 #include <array>
+#include <cstddef>
+#include <limits>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace linkcell {
 
+/// Failure from a neighbour search. `status()` is the C ABI return
+/// (0 success, nonzero failure).
+class Error : public std::runtime_error {
+public:
+  Error(int status, std::string message)
+      : std::runtime_error(message.empty() ? "linkcell: knearest failed"
+                                           : std::move(message)),
+        status_(status) {}
+
+  explicit Error(std::string message) : Error(1, std::move(message)) {}
+
+  [[nodiscard]] int status() const noexcept { return status_; }
+
+private:
+  int status_;
+};
+
+/// Periodic parallelepiped. Fields match `lc_cell` (lattice vectors
+/// a, b, c and dump-cell origin).
 struct Cell {
   std::array<double, 3> a{};
   std::array<double, 3> b{};
   std::array<double, 3> c{};
   std::array<double, 3> origin{};
 
-  static Cell ortho(double lx, double ly, double lz) {
+  Cell() = default;
+
+  explicit Cell(const lc_cell &raw) noexcept
+      : a{raw.ax, raw.ay, raw.az}, b{raw.bx, raw.by, raw.bz},
+        c{raw.cx, raw.cy, raw.cz}, origin{raw.ox, raw.oy, raw.oz} {}
+
+  static Cell ortho(double lx, double ly, double lz) noexcept {
     Cell cell;
     cell.a = {lx, 0.0, 0.0};
     cell.b = {0.0, ly, 0.0};
@@ -28,49 +59,164 @@ struct Cell {
     return cell;
   }
 
-  lc_cell raw() const {
-    return lc_cell{a[0], a[1], a[2], b[0], b[1], b[2],
-                   c[0], c[1], c[2], origin[0], origin[1], origin[2]};
+  static Cell from_vectors(std::array<double, 3> a, std::array<double, 3> b,
+                           std::array<double, 3> c,
+                           std::array<double, 3> origin = {}) noexcept {
+    Cell cell;
+    cell.a = a;
+    cell.b = b;
+    cell.c = c;
+    cell.origin = origin;
+    return cell;
   }
+
+  [[nodiscard]] lc_cell raw() const noexcept {
+    return lc_cell{a[0],        a[1],        a[2],        b[0],
+                   b[1],        b[2],        c[0],        c[1],
+                   c[2],        origin[0],   origin[1],   origin[2]};
+  }
+
+  [[nodiscard]] explicit operator lc_cell() const noexcept { return raw(); }
 };
 
-/// k-nearest neighbour indices, nearest first. Empty row if the point
-/// was masked or isolated.
-inline std::vector<std::vector<int>>
-knearest(const std::vector<std::array<double, 3>> &xyz, const Cell &box, int k,
-         const int *mask = nullptr, double cell_hint = 0.0) {
-  const int n = static_cast<int>(xyz.size());
-  if (n == 0) {
-    return {};
-  }
-  std::vector<double> packed(static_cast<std::size_t>(n) * 3);
-  for (int i = 0; i < n; i++) {
-    packed[static_cast<std::size_t>(i) * 3 + 0] = xyz[static_cast<std::size_t>(i)][0];
-    packed[static_cast<std::size_t>(i) * 3 + 1] = xyz[static_cast<std::size_t>(i)][1];
-    packed[static_cast<std::size_t>(i) * 3 + 2] = xyz[static_cast<std::size_t>(i)][2];
-  }
-  std::vector<int> out(static_cast<std::size_t>(n) * static_cast<std::size_t>(k),
-                       -1);
-  const lc_cell raw = box.raw();
-  if (lc_knearest(packed.data(), n, &raw, k, mask, cell_hint, out.data()) !=
-      0) {
-    const char *msg = lc_last_error();
-    throw std::runtime_error(msg ? msg : "linkcell: knearest failed");
-  }
-  std::vector<std::vector<int>> rows(static_cast<std::size_t>(n));
-  for (int i = 0; i < n; i++) {
-    for (int t = 0; t < k; t++) {
-      const int j = out[static_cast<std::size_t>(i) * static_cast<std::size_t>(k) +
-                        static_cast<std::size_t>(t)];
-      if (j >= 0) {
-        rows[static_cast<std::size_t>(i)].push_back(j);
-      }
+/// Non-owning n-by-k view of neighbour indices.
+///
+/// `data()[i * k() + j]` is the j-th neighbour of source i, nearest
+/// first. The slot is -1 when that neighbour is missing (masked or
+/// isolated).
+class Neighbours {
+public:
+  Neighbours() = default;
+
+  Neighbours(const int *data, std::size_t n, std::size_t k)
+      : data_(data), n_(n), k_(k) {
+    if (k != 0 && n > std::numeric_limits<std::size_t>::max() / k) {
+      throw Error("n * k overflows");
+    }
+    if (n * k != 0 && data == nullptr) {
+      throw Error("null pointer");
     }
   }
-  return rows;
+
+  Neighbours(const std::vector<int> &idx, std::size_t n, std::size_t k)
+      : Neighbours(idx.data(), n, k) {
+    if (idx.size() != n * k) {
+      throw Error("neighbour buffer length must be n * k");
+    }
+  }
+
+  /// j-th neighbour of source i, or -1 if missing.
+  [[nodiscard]] int neighbour(std::size_t i, std::size_t j) const {
+    if (i >= n_ || j >= k_) {
+      throw std::out_of_range("linkcell: neighbour index out of range");
+    }
+    return data_[i * k_ + j];
+  }
+
+  [[nodiscard]] std::size_t n() const noexcept { return n_; }
+  [[nodiscard]] std::size_t k() const noexcept { return k_; }
+  [[nodiscard]] std::size_t size() const noexcept { return n_ * k_; }
+  [[nodiscard]] const int *data() const noexcept { return data_; }
+  [[nodiscard]] const int *begin() const noexcept { return data_; }
+  [[nodiscard]] const int *end() const noexcept { return data_ + size(); }
+
+private:
+  const int *data_ = nullptr;
+  std::size_t n_ = 0;
+  std::size_t k_ = 0;
+};
+
+namespace detail {
+
+template <typename R, typename Xyz, typename Count, typename... Rest>
+Count count_arg(R (*)(Xyz, Count, Rest...));
+
+// C ABI counts are size_t. Convert through the declared parameter
+// type and refuse truncation if a future header regresses.
+using lc_count = decltype(count_arg(&lc_knearest));
+
+static_assert(std::is_integral<lc_count>::value,
+              "lc_knearest count parameter must be an integral type");
+
+inline lc_count to_c_count(std::size_t v, const char *what) {
+  const auto maxv =
+      static_cast<std::size_t>(std::numeric_limits<lc_count>::max());
+  if (v > maxv) {
+    throw Error(std::string("linkcell: ") + what +
+                " exceeds the C ABI count range");
+  }
+  return static_cast<lc_count>(v);
 }
 
-inline const char *version() { return lc_version(); }
+inline void knearest_into(const double *xyz, std::size_t n, const Cell &cell,
+                          std::size_t k, int *out, const int *mask,
+                          double cell_hint) {
+  if (n == 0) {
+    throw Error("no points");
+  }
+  if (k == 0) {
+    throw Error("k must be at least 1");
+  }
+  if (xyz == nullptr || out == nullptr) {
+    throw Error("null pointer");
+  }
+  const lc_cell raw = cell.raw();
+  const int status =
+      lc_knearest(xyz, to_c_count(n, "n"), &raw, to_c_count(k, "k"), mask,
+                  cell_hint, out);
+  if (status != 0) {
+    const char *msg = lc_last_error();
+    throw Error(status, msg ? std::string(msg)
+                            : std::string("linkcell: knearest failed"));
+  }
+}
+
+} // namespace detail
+
+/// Write k-nearest indices into caller-owned `out` of length n * k.
+/// `out[i * k + j]` is the j-th neighbour of i, or -1 if missing.
+/// `mask` is nullptr (all points) or n ints, nonzero to include.
+/// `cell_hint <= 0` selects the default edge.
+[[nodiscard]] inline Neighbours
+knearest(const double *xyz, std::size_t n, const Cell &cell, std::size_t k,
+         int *out, const int *mask = nullptr, double cell_hint = 0.0) {
+  detail::knearest_into(xyz, n, cell, k, out, mask, cell_hint);
+  return Neighbours(out, n, k);
+}
+
+/// One allocation of n * k indices. Wrap the result in `Neighbours`
+/// for `neighbour(i, j)`. The 5th argument of the in-place overload
+/// is `out`; pass mask together with `cell_hint` on this path.
+[[nodiscard]] inline std::vector<int>
+knearest(const double *xyz, std::size_t n, const Cell &cell, std::size_t k) {
+  if (k != 0 && n > std::numeric_limits<std::size_t>::max() / k) {
+    throw Error("n * k overflows");
+  }
+  std::vector<int> out(n * k, -1);
+  detail::knearest_into(xyz, n, cell, k, out.data(), nullptr, 0.0);
+  return out;
+}
+
+[[nodiscard]] inline std::vector<int>
+knearest(const double *xyz, std::size_t n, const Cell &cell, std::size_t k,
+         const int *mask, double cell_hint) {
+  if (k != 0 && n > std::numeric_limits<std::size_t>::max() / k) {
+    throw Error("n * k overflows");
+  }
+  std::vector<int> out(n * k, -1);
+  detail::knearest_into(xyz, n, cell, k, out.data(), mask, cell_hint);
+  return out;
+}
+
+/// `std::vector<std::array<double, 3>>` is already packed n * 3 doubles.
+[[nodiscard]] inline std::vector<int>
+knearest(const std::vector<std::array<double, 3>> &xyz, const Cell &cell,
+         std::size_t k, const int *mask = nullptr, double cell_hint = 0.0) {
+  const double *ptr = xyz.empty() ? nullptr : xyz.front().data();
+  return knearest(ptr, xyz.size(), cell, k, mask, cell_hint);
+}
+
+[[nodiscard]] inline const char *version() noexcept { return lc_version(); }
 
 } // namespace linkcell
 

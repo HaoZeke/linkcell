@@ -1,6 +1,6 @@
 [package]
 name = "linkcell"
-version = "0.1.2"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.70"
 description = "Periodic linked-cell k-nearest neighbour search for molecular simulations"
@@ -23,6 +23,10 @@ parallel = ["dep:rayon"]
 
 [dependencies]
 rayon = { version = "1.10", optional = true }
+
+[[test]]
+name = "abi"
+required-features = ["capi"]
 
 [profile.release]
 lto = true

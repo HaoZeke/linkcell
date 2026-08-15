@@ -1,32 +1,23 @@
 @PACKAGE_INIT@
 
-include(CMakeFindDependencyMacro)
-find_dependency(Threads)
-
 set_and_check(LINKCELL_INCLUDE_DIR "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_INCLUDEDIR@")
 
 if(WIN32)
-  set(_linkcell_libname linkcell.lib)
+  set_and_check(LINKCELL_LIBRARY "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_BINDIR@/@LINKCELL_SHARED_NAME@")
+  set_and_check(LINKCELL_IMPLIB "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_LIBDIR@/@LINKCELL_IMPLIB_NAME@")
 else()
-  set(_linkcell_libname liblinkcell.a)
+  set_and_check(LINKCELL_LIBRARY "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_LIBDIR@/@LINKCELL_SHARED_NAME@")
 endif()
-set_and_check(LINKCELL_LIBRARY "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_LIBDIR@/${_linkcell_libname}")
 
 if(NOT TARGET linkcell::linkcell)
-  add_library(linkcell::linkcell STATIC IMPORTED)
-  set(_linkcell_iface Threads::Threads)
-  if(UNIX AND NOT APPLE)
-    list(APPEND _linkcell_iface ${CMAKE_DL_LIBS} m)
-  elseif(APPLE)
-    list(APPEND _linkcell_iface m)
-  endif()
+  add_library(linkcell::linkcell SHARED IMPORTED)
   set_target_properties(linkcell::linkcell PROPERTIES
     IMPORTED_LOCATION "${LINKCELL_LIBRARY}"
-    INTERFACE_INCLUDE_DIRECTORIES "${LINKCELL_INCLUDE_DIR}"
-    INTERFACE_LINK_LIBRARIES "${_linkcell_iface}")
+    INTERFACE_INCLUDE_DIRECTORIES "${LINKCELL_INCLUDE_DIR}")
+  if(WIN32)
+    set_target_properties(linkcell::linkcell PROPERTIES
+      IMPORTED_IMPLIB "${LINKCELL_IMPLIB}")
+  endif()
 endif()
-
-unset(_linkcell_libname)
-unset(_linkcell_iface)
 
 check_required_components(linkcell)
