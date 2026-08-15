@@ -19,6 +19,9 @@ ABI break. Existing 0.1.x C and C++ callers must rebuild.
 - The per-source k-set keeps one image of each neighbour (the
   nearest). The same particle visited through two wraps does not
   occupy two slots.
+- `knearest_brute` on a sheared cell takes the 27-image minimum.
+  The single parallelepiped wrap is not the Wigner-Seitz cell of a
+  60-degree hex prism.
 
 ## 0.1.2
 
