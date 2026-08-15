@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.2
+
+Fold once, then Cartesian pair distances plus a lattice shift
+(the vesin / LAMMPS ghost trick). Sources run in parallel. The C
+ABI writes indices into the caller buffer.
+
 ## 0.1.1
 
 Orthorhombic boxes use the three-wrap minimum image, not two

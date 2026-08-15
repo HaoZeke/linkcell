@@ -4,7 +4,7 @@ use std::ffi::{c_char, c_int, CString};
 use std::ptr;
 use std::sync::Mutex;
 
-use crate::{knearest, Cell};
+use crate::Cell;
 
 /// Periodic parallelepiped. Lattice vectors are a, b, c (same as vesin rows).
 #[repr(C)]
@@ -124,29 +124,11 @@ pub unsafe extern "C" fn lc_knearest(
     } else {
         None
     };
-    let rows = match knearest(
-        &pts,
-        &sim,
-        k_us,
-        mask_vec.as_deref(),
-        hint,
-    ) {
-        Ok(r) => r,
-        Err(e) => {
-            set_error(&e.to_string());
-            return 1;
-        }
-    };
     let out = std::slice::from_raw_parts_mut(out_nn, n_us * k_us);
-    for slot in out.iter_mut() {
-        *slot = -1;
-    }
-    for (i, row) in rows.iter().enumerate() {
-        for (t, &j) in row.indices.iter().enumerate() {
-            if t < k_us {
-                out[i * k_us + t] = j as c_int;
-            }
-        }
+    if let Err(e) = crate::knearest_into(&pts, &sim, k_us, mask_vec.as_deref(), hint, out)
+    {
+        set_error(&e.to_string());
+        return 1;
     }
     if let Ok(mut slot) = LAST_ERROR.lock() {
         *slot = None;

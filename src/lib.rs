@@ -16,7 +16,7 @@ mod knearest;
 
 pub use cell::Cell;
 pub use error::Error;
-pub use knearest::{knearest, knearest_brute, Neighbors};
+pub use knearest::{knearest, knearest_brute, knearest_into, Neighbors};
 
 #[cfg(feature = "capi")]
 mod capi;

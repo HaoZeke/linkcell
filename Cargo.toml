@@ -1,6 +1,6 @@
 [package]
 name = "linkcell"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 rust-version = "1.70"
 description = "Periodic linked-cell k-nearest neighbour search for molecular simulations"
@@ -17,10 +17,12 @@ name = "linkcell"
 crate-type = ["rlib", "staticlib", "cdylib"]
 
 [features]
-default = ["capi"]
+default = ["capi", "parallel"]
 capi = []
+parallel = ["dep:rayon"]
 
 [dependencies]
+rayon = { version = "1.10", optional = true }
 
 [profile.release]
 lto = true

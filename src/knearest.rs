@@ -106,6 +106,30 @@ pub struct Neighbors {
     pub dist2: Vec<f64>,
 }
 
+/// Write k-nearest indices, nearest first, into caller storage.
+/// `out` has length `n * k`. Unused slots are `-1`.
+pub fn knearest_into(
+    xyz: &[[f64; 3]],
+    simbox: &Cell,
+    k: usize,
+    mask: Option<&[bool]>,
+    cell_hint: Option<f64>,
+    out: &mut [i32],
+) -> Result<(), Error> {
+    let n = xyz.len();
+    if out.len() != n * k {
+        return Err(Error::Empty);
+    }
+    out.fill(-1);
+    let rows = search(xyz, simbox, k, mask, cell_hint)?;
+    for (i, pairs) in rows {
+        for (t, &(_, j)) in pairs.iter().enumerate() {
+            out[i * k + t] = j as i32;
+        }
+    }
+    Ok(())
+}
+
 /// k-nearest neighbours of every point (or of the masked subset).
 ///
 /// `mask[i] == false` drops point `i` from both sources and candidates.
@@ -118,6 +142,22 @@ pub fn knearest(
     mask: Option<&[bool]>,
     cell_hint: Option<f64>,
 ) -> Result<Vec<Neighbors>, Error> {
+    let n = xyz.len();
+    let mut out = vec![Neighbors::default(); n];
+    for (i, pairs) in search(xyz, simbox, k, mask, cell_hint)? {
+        out[i].dist2 = pairs.iter().map(|p| p.0).collect();
+        out[i].indices = pairs.iter().map(|p| p.1).collect();
+    }
+    Ok(out)
+}
+
+fn search(
+    xyz: &[[f64; 3]],
+    simbox: &Cell,
+    k: usize,
+    mask: Option<&[bool]>,
+    cell_hint: Option<f64>,
+) -> Result<Vec<(usize, Vec<(f64, usize)>)>, Error> {
     if k == 0 {
         return Err(Error::ZeroK);
     }
@@ -129,7 +169,7 @@ pub fn knearest(
         .filter(|&i| mask.map(|m| m.get(i).copied().unwrap_or(false)).unwrap_or(true))
         .collect();
     if active.is_empty() {
-        return Ok(vec![Neighbors::default(); n]);
+        return Ok(Vec::new());
     }
 
     let mut edge = cell_hint.unwrap_or(3.0);
@@ -150,43 +190,39 @@ pub fn knearest(
         .min(w[1] / f64::from(ny))
         .min(w[2] / f64::from(nz));
 
+    // Fold into the primary cell once. Pair distances are then a
+    // Cartesian subtract plus a lattice shift (vesin / LAMMPS ghosts).
+    let mut folded = vec![[0.0; 3]; n];
+    let mut bin = vec![(0i32, 0i32, 0i32); n];
+    for &i in &active {
+        let s = simbox.fractional(xyz[i]);
+        folded[i] = simbox.cartesian(s);
+        bin[i] = (
+            ((s[0] * invx) as i32).clamp(0, nx - 1),
+            ((s[1] * invy) as i32).clamp(0, ny - 1),
+            ((s[2] * invz) as i32).clamp(0, nz - 1),
+        );
+    }
+
     let mut head = vec![-1isize; ncell];
     let mut next = vec![-1isize; n];
-
-    let cell_of = |i: usize| -> (i32, i32, i32) {
-        let s = simbox.fractional(xyz[i]);
-        let ix = ((s[0] * invx) as i32).clamp(0, nx - 1);
-        let iy = ((s[1] * invy) as i32).clamp(0, ny - 1);
-        let iz = ((s[2] * invz) as i32).clamp(0, nz - 1);
-        (ix, iy, iz)
-    };
     let cell_index = |ix: i32, iy: i32, iz: i32| -> usize {
         let cx = ix.rem_euclid(nx);
         let cy = iy.rem_euclid(ny);
         let cz = iz.rem_euclid(nz);
         ((cz * ny + cy) * nx + cx) as usize
     };
-
     for &i in &active {
-        let (ix, iy, iz) = cell_of(i);
+        let (ix, iy, iz) = bin[i];
         let c = cell_index(ix, iy, iz);
         next[i] = head[c];
         head[c] = i as isize;
     }
 
     let max_reach = nx.max(ny).max(nz) / 2 + 1;
-    let mut seen = vec![0u32; ncell];
-    let mut stamp: u32 = 1;
-    let mut out = vec![Neighbors::default(); n];
-
-    for &i in &active {
+    let one = |i: usize| -> (usize, Vec<(f64, usize)>) {
         let mut heap = KHeap::new(k);
-        let (ix, iy, iz) = cell_of(i);
-        stamp = stamp.wrapping_add(1);
-        if stamp == 0 {
-            seen.fill(0);
-            stamp = 1;
-        }
+        let (ix, iy, iz) = bin[i];
         let mut reach = 1i32;
         while reach <= max_reach {
             for dx in -reach..=reach {
@@ -199,16 +235,23 @@ pub fn knearest(
                         if !shell && reach > 1 {
                             continue;
                         }
-                        let c = cell_index(ix + dx, iy + dy, iz + dz);
-                        if seen[c] == stamp {
-                            continue;
-                        }
-                        seen[c] = stamp;
+                        let jx = ix + dx;
+                        let jy = iy + dy;
+                        let jz = iz + dz;
+                        let c = cell_index(jx, jy, jz);
+                        let shift = simbox.lattice_shift(
+                            jx.div_euclid(nx),
+                            jy.div_euclid(ny),
+                            jz.div_euclid(nz),
+                        );
                         let mut j = head[c];
                         while j >= 0 {
                             let ju = j as usize;
                             if ju != i {
-                                heap.push(simbox.dist2(xyz[i], xyz[ju]), ju);
+                                heap.push(
+                                    simbox.dist2_shifted(folded[i], folded[ju], shift),
+                                    ju,
+                                );
                             }
                             j = next[ju];
                         }
@@ -223,12 +266,18 @@ pub fn knearest(
             }
             reach += 1;
         }
-        let pairs = heap.finish();
-        let row = &mut out[i];
-        row.dist2 = pairs.iter().map(|p| p.0).collect();
-        row.indices = pairs.iter().map(|p| p.1).collect();
+        (i, heap.finish())
+    };
+
+    #[cfg(feature = "parallel")]
+    {
+        use rayon::prelude::*;
+        Ok(active.par_iter().copied().map(one).collect())
     }
-    Ok(out)
+    #[cfg(not(feature = "parallel"))]
+    {
+        Ok(active.iter().copied().map(one).collect())
+    }
 }
 
 /// Brute-force k-nearest. Tests and small systems only.
