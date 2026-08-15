@@ -1,7 +1,7 @@
 project(
   'linkcell',
   ['c', 'cpp'],
-  version: '0.1.0',
+  version: '0.1.1',
   meson_version: '>=1.2.0',
   license: 'MIT',
   default_options: [

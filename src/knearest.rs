@@ -3,6 +3,100 @@
 use crate::cell::Cell;
 use crate::Error;
 
+/// Bounded max-heap of (dist2, index). k is 4 in ice; the small
+/// case stays on the stack so the pair loop does not allocate.
+struct KHeap {
+    d2: [f64; 16],
+    idx: [usize; 16],
+    extra_d2: Vec<f64>,
+    extra_idx: Vec<usize>,
+    n: usize,
+    k: usize,
+}
+
+impl KHeap {
+    fn new(k: usize) -> Self {
+        let mut extra_d2 = Vec::new();
+        let mut extra_idx = Vec::new();
+        if k > 16 {
+            extra_d2.resize(k, 0.0);
+            extra_idx.resize(k, 0);
+        }
+        Self {
+            d2: [0.0; 16],
+            idx: [0; 16],
+            extra_d2,
+            extra_idx,
+            n: 0,
+            k,
+        }
+    }
+
+    fn d2_at(&self, t: usize) -> f64 {
+        if self.k <= 16 {
+            self.d2[t]
+        } else {
+            self.extra_d2[t]
+        }
+    }
+
+    fn set(&mut self, t: usize, d2: f64, j: usize) {
+        if self.k <= 16 {
+            self.d2[t] = d2;
+            self.idx[t] = j;
+        } else {
+            self.extra_d2[t] = d2;
+            self.extra_idx[t] = j;
+        }
+    }
+
+    fn push(&mut self, d2: f64, j: usize) {
+        if self.n < self.k {
+            self.set(self.n, d2, j);
+            self.n += 1;
+            return;
+        }
+        let mut worst = 0;
+        for t in 1..self.n {
+            if self.d2_at(t) > self.d2_at(worst) {
+                worst = t;
+            }
+        }
+        if d2 < self.d2_at(worst) {
+            self.set(worst, d2, j);
+        }
+    }
+
+    fn full(&self) -> bool {
+        self.n >= self.k
+    }
+
+    fn worst(&self) -> f64 {
+        let mut w = self.d2_at(0);
+        for t in 1..self.n {
+            let v = self.d2_at(t);
+            if v > w {
+                w = v;
+            }
+        }
+        w
+    }
+
+    fn finish(self) -> Vec<(f64, usize)> {
+        let mut pairs = Vec::with_capacity(self.n);
+        for t in 0..self.n {
+            let j = if self.k <= 16 {
+                self.idx[t]
+            } else {
+                self.extra_idx[t]
+            };
+            pairs.push((self.d2_at(t), j));
+        }
+        pairs.sort_by(|a, b| a.0.total_cmp(&b.0));
+        pairs
+    }
+}
+
 /// One source's k nearest neighbours, nearest first.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Neighbors {
@@ -66,11 +160,11 @@ pub fn knearest(
         let iz = ((s[2] * invz) as i32).clamp(0, nz - 1);
         (ix, iy, iz)
     };
-    let cell_index = |mut ix: i32, mut iy: i32, mut iz: i32| -> usize {
-        ix = ix.rem_euclid(nx);
-        iy = iy.rem_euclid(ny);
-        iz = iz.rem_euclid(nz);
-        ((iz * ny + iy) * nx + ix) as usize
+    let cell_index = |ix: i32, iy: i32, iz: i32| -> usize {
+        let cx = ix.rem_euclid(nx);
+        let cy = iy.rem_euclid(ny);
+        let cz = iz.rem_euclid(nz);
+        ((cz * ny + cy) * nx + cx) as usize
     };
 
     for &i in &active {
@@ -86,9 +180,7 @@ pub fn knearest(
     let mut out = vec![Neighbors::default(); n];
 
     for &i in &active {
-        // Max-heap of size k on IEEE bits of dist2 (distances are finite).
-        let mut heap: std::collections::BinaryHeap<(u64, usize)> =
-            std::collections::BinaryHeap::new();
+        let mut heap = KHeap::new(k);
         let (ix, iy, iz) = cell_of(i);
         stamp = stamp.wrapping_add(1);
         if stamp == 0 {
@@ -116,37 +208,22 @@ pub fn knearest(
                         while j >= 0 {
                             let ju = j as usize;
                             if ju != i {
-                                let d2 = simbox.dist2(xyz[i], xyz[ju]);
-                                let key = d2.to_bits();
-                                if heap.len() < k {
-                                    heap.push((key, ju));
-                                } else if let Some(&(top, _)) = heap.peek() {
-                                    if key < top {
-                                        heap.pop();
-                                        heap.push((key, ju));
-                                    }
-                                }
+                                heap.push(simbox.dist2(xyz[i], xyz[ju]), ju);
                             }
                             j = next[ju];
                         }
                     }
                 }
             }
-            if heap.len() >= k {
-                if let Some(&(top, _)) = heap.peek() {
-                    let bound = f64::from(reach) * cell_min;
-                    if f64::from_bits(top) <= bound * bound {
-                        break;
-                    }
+            if heap.full() {
+                let bound = f64::from(reach) * cell_min;
+                if heap.worst() <= bound * bound {
+                    break;
                 }
             }
             reach += 1;
         }
-        let mut pairs: Vec<(f64, usize)> = heap
-            .into_iter()
-            .map(|(bits, j)| (f64::from_bits(bits), j))
-            .collect();
-        pairs.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let pairs = heap.finish();
         let row = &mut out[i];
         row.dist2 = pairs.iter().map(|p| p.0).collect();
         row.indices = pairs.iter().map(|p| p.1).collect();

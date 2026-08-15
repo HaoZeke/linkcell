@@ -17,6 +17,8 @@ pub struct Cell {
     origin: [f64; 3],
     /// Perpendicular widths |a · n_a| etc., used to size the cell list.
     widths: [f64; 3],
+    /// Axis-aligned diagonal box: MIC is three independent wraps.
+    ortho: bool,
 }
 
 impl Cell {
@@ -61,7 +63,13 @@ impl Cell {
             hinv,
             origin,
             widths: [wa, wb, wc],
+            ortho: is_axis_aligned(h),
         })
+    }
+
+    /// True when H is diagonal. Distances then skip the two matvecs.
+    pub fn is_ortho(&self) -> bool {
+        self.ortho
     }
 
     /// Lattice vector a (first column of H).
@@ -92,6 +100,13 @@ impl Cell {
     /// Fractional coordinates in [0, 1).
     #[inline]
     pub fn fractional(&self, r: [f64; 3]) -> [f64; 3] {
+        if self.ortho {
+            return [
+                wrap01((r[0] - self.origin[0]) / self.widths[0]),
+                wrap01((r[1] - self.origin[1]) / self.widths[1]),
+                wrap01((r[2] - self.origin[2]) / self.widths[2]),
+            ];
+        }
         let d = [
             r[0] - self.origin[0],
             r[1] - self.origin[1],
@@ -99,10 +114,7 @@ impl Cell {
         ];
         let mut s = mul(self.hinv, d);
         for e in &mut s {
-            *e -= e.floor();
-            if *e >= 1.0 {
-                *e = 0.0;
-            }
+            *e = wrap01(*e);
         }
         s
     }
@@ -118,17 +130,92 @@ impl Cell {
         ]
     }
 
+    /// Cartesian translation by integer lattice counts (na, nb, nc).
+    /// vesin and LAMMPS add this shift once per neighbour cell so the
+    /// pair loop is a plain subtract, not a minimum-image wrap.
+    #[inline]
+    pub fn lattice_shift(&self, na: i32, nb: i32, nc: i32) -> [f64; 3] {
+        if self.ortho {
+            [
+                f64::from(na) * self.widths[0],
+                f64::from(nb) * self.widths[1],
+                f64::from(nc) * self.widths[2],
+            ]
+        } else {
+            let a = self.h[0];
+            let b = self.h[1];
+            let c = self.h[2];
+            let fa = f64::from(na);
+            let fb = f64::from(nb);
+            let fc = f64::from(nc);
+            [
+                fa * a[0] + fb * b[0] + fc * c[0],
+                fa * a[1] + fb * b[1] + fc * c[1],
+                fa * a[2] + fb * b[2] + fc * c[2],
+            ]
+        }
+    }
+
+    /// Squared Cartesian distance after applying a lattice shift to `q`.
+    #[inline]
+    pub fn dist2_shifted(&self, p: [f64; 3], q: [f64; 3], shift: [f64; 3]) -> f64 {
+        let dx = q[0] + shift[0] - p[0];
+        let dy = q[1] + shift[1] - p[1];
+        let dz = q[2] + shift[2] - p[2];
+        dx * dx + dy * dy + dz * dz
+    }
+
     /// Squared minimum-image distance.
     #[inline]
     pub fn dist2(&self, p: [f64; 3], q: [f64; 3]) -> f64 {
-        let dp = [q[0] - p[0], q[1] - p[1], q[2] - p[2]];
-        let mut ds = mul(self.hinv, dp);
-        for e in &mut ds {
-            *e -= e.round();
+        if self.ortho {
+            return dist2_ortho(self.widths, p, q);
         }
-        let dr = mul(self.h, ds);
-        dr[0] * dr[0] + dr[1] * dr[1] + dr[2] * dr[2]
+        dist2_general(self.h, self.hinv, p, q)
     }
+}
+
+#[inline]
+fn wrap01(mut s: f64) -> f64 {
+    s -= s.floor();
+    if s >= 1.0 {
+        0.0
+    } else {
+        s
+    }
+}
+
+#[inline]
+fn dist2_ortho(l: [f64; 3], p: [f64; 3], q: [f64; 3]) -> f64 {
+    let mut r2 = 0.0;
+    for k in 0..3 {
+        let mut d = (q[k] - p[k]).abs();
+        d -= l[k] * (d / l[k]).round();
+        r2 += d * d;
+    }
+    r2
+}
+
+#[inline]
+fn dist2_general(h: [[f64; 3]; 3], hinv: [[f64; 3]; 3], p: [f64; 3], q: [f64; 3]) -> f64 {
+    let dp = [q[0] - p[0], q[1] - p[1], q[2] - p[2]];
+    let mut ds = mul(hinv, dp);
+    for e in &mut ds {
+        *e -= e.round();
+    }
+    let dr = mul(h, ds);
+    dr[0] * dr[0] + dr[1] * dr[1] + dr[2] * dr[2]
+}
+
+fn is_axis_aligned(h: [[f64; 3]; 3]) -> bool {
+    let scale = (norm(h[0]) + norm(h[1]) + norm(h[2])).max(1.0);
+    let tol = 1e-12 * scale;
+    h[0][1].abs() <= tol
+        && h[0][2].abs() <= tol
+        && h[1][0].abs() <= tol
+        && h[1][2].abs() <= tol
+        && h[2][0].abs() <= tol
+        && h[2][1].abs() <= tol
 }
 
 /// H is stored by columns. `mul(h, s)` is H s.
@@ -187,4 +274,41 @@ fn invert_columns(h: [[f64; 3]; 3]) -> Option<([[f64; 3]; 3], f64)> {
     ];
     // inv is stored as inv[col][row] matching H.
     Some((inv, det))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ortho_flag_and_dist2_match_general() {
+        let b = Cell::ortho(10.0, 11.0, 12.0).unwrap();
+        assert!(b.is_ortho());
+        let p = [0.2, 1.0, 11.5];
+        let q = [9.7, 10.8, 0.4];
+        let fast = b.dist2(p, q);
+        let slow = dist2_general(b.h, b.hinv, p, q);
+        assert!((fast - slow).abs() <= 1e-12 * (1.0 + fast.abs()));
+        let near = [1.0, 2.0, 3.0];
+        let far = [2.0, 3.0, 4.0];
+        let zero = [0.0, 0.0, 0.0];
+        assert!(
+            (b.dist2_shifted(near, far, zero) - b.dist2(near, far)).abs()
+                <= 1e-12
+        );
+        let left = [0.2, 0.0, 0.0];
+        let right = [9.4, 0.0, 0.0];
+        let mic = b.dist2(left, right);
+        let via = b.dist2_shifted(left, right, b.lattice_shift(-1, 0, 0));
+        assert!((via - mic).abs() <= 1e-12 * (1.0 + mic.abs()));
+        assert!((mic - 0.64).abs() <= 1e-12);
+        let sheared = Cell::from_vectors(
+            [10.0, 0.0, 0.0],
+            [5.0, 8.66, 0.0],
+            [0.0, 0.0, 10.0],
+            [0.0, 0.0, 0.0],
+        )
+        .unwrap();
+        assert!(!sheared.is_ortho());
+    }
 }

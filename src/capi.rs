@@ -106,10 +106,9 @@ pub unsafe extern "C" fn lc_knearest(
             return 1;
         }
     };
-    let pts: Vec<[f64; 3]> = std::slice::from_raw_parts(xyz, n_us * 3)
-        .chunks_exact(3)
-        .map(|c| [c[0], c[1], c[2]])
-        .collect();
+    // Packed xyz is already [[f64; 3]; n] in memory. Copying it was
+    // the extra tax on every d-SEAMS call.
+    let pts: &[[f64; 3]] = std::slice::from_raw_parts(xyz.cast::<[f64; 3]>(), n_us);
     let mask_vec: Option<Vec<bool>> = if mask.is_null() {
         None
     } else {

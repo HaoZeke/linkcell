@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1
+
+Orthorhombic boxes use the three-wrap minimum image, not two
+3x3 matvecs. The C ABI reads packed xyz in place. The k-heap for
+k <= 16 stays on the stack.
+
 ## 0.1.0
 
 Periodic linked-cell k-nearest neighbour search. Rust crate, C ABI
