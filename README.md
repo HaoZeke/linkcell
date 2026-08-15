@@ -14,12 +14,63 @@ C++ is a RAII header over that ABI.
 
 ## Install
 
+Rust:
+
 ```
 cargo add linkcell
 ```
 
-C / C++ consumers build the `staticlib` (`--features capi`, on by default)
-and include `include/linkcell.h` or `include/linkcell.hpp`.
+C and C++ consumers take the `staticlib` (`--features capi`, on by default)
+plus `include/linkcell.h` or `include/linkcell.hpp`. Meson, CMake, and
+pkg-config all install that archive and those headers.
+
+### Meson
+
+```
+meson setup build
+meson compile -C build
+meson install -C build
+```
+
+As a wrap, Meson exposes `linkcell_dep`:
+
+```
+[wrap-git]
+url = https://github.com/HaoZeke/linkcell.git
+revision = v0.1.0
+depth = 1
+
+[provide]
+linkcell = linkcell_dep
+```
+
+```meson
+linkcell_dep = dependency('linkcell', fallback: ['linkcell', 'linkcell_dep'])
+```
+
+### CMake
+
+```
+cmake -B build -DCMAKE_INSTALL_PREFIX=$PREFIX
+cmake --build build
+cmake --install build
+```
+
+```cmake
+find_package(linkcell 0.1 REQUIRED)
+target_link_libraries(app PRIVATE linkcell::linkcell)
+```
+
+In the same build tree the target is `linkcell::linkcell`.
+
+### pkg-config
+
+```
+pkg-config --cflags --libs linkcell
+```
+
+Both Meson and CMake write `linkcell.pc` (Libs includes the Rust
+sysroot: pthread, dl, m on Linux).
 
 ## Rust
 

@@ -99,6 +99,10 @@ Testing/
 
 /target/
 /build/
+/build-meson/
+/build-cmake/
+/destdir-meson/
+/prefix-cmake/
 /.pixi/
 *.a
 *.so

@@ -1,0 +1,4 @@
+option('with_tests', type: 'boolean', value: true,
+  description: 'Run cargo test from meson test')
+option('with_examples', type: 'boolean', value: true,
+  description: 'Build C and C++ example programs')

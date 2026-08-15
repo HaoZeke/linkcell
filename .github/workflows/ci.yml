@@ -1,0 +1,64 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+jobs:
+  cargo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --locked
+
+  meson:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install meson ninja
+      - run: meson setup build
+      - run: meson compile -C build
+      - run: meson test -C build --print-errorlogs
+      - run: meson install -C build --destdir "$PWD/destdir"
+      - name: pkg-config after meson install
+        run: |
+          prefix="$PWD/destdir/usr/local"
+          export PKG_CONFIG_PATH="$prefix/lib/x86_64-linux-gnu/pkgconfig:$prefix/lib/pkgconfig"
+          pkg-config --exists --print-errors linkcell
+          pkg-config --modversion linkcell
+          pkg-config --cflags --libs linkcell
+          test -f "$prefix/include/linkcell.h"
+          test -f "$prefix/include/linkcell.hpp"
+          test -f "$prefix/lib/x86_64-linux-gnu/liblinkcell.a" \
+            -o -f "$prefix/lib/liblinkcell.a"
+
+  cmake:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cmake -S . -B build -DCMAKE_INSTALL_PREFIX="$PWD/prefix"
+      - run: cmake --build build
+      - run: ctest --test-dir build --output-on-failure
+      - run: cmake --install build
+      - name: find_package and pkg-config after cmake install
+        run: |
+          test -f prefix/include/linkcell.h
+          test -f prefix/lib/liblinkcell.a
+          test -f prefix/lib/pkgconfig/linkcell.pc
+          test -f prefix/lib/cmake/linkcell/linkcellConfig.cmake
+          export PKG_CONFIG_PATH="$PWD/prefix/lib/pkgconfig"
+          pkg-config --exists --print-errors linkcell
+          pkg-config --modversion linkcell
+          cmake -S tests/cmake-consumer -B find-build \
+            -DCMAKE_PREFIX_PATH="$PWD/prefix" \
+            -DLINKCELL_EXAMPLE="$PWD/examples/two_points.cpp"
+          cmake --build find-build
+          ./find-build/find_lc
