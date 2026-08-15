@@ -6,19 +6,27 @@
 /// `(xlo, ylo, zlo)` is only used to bin points; distances use the lengths.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct OrthoBox {
+    /// Periodic length in x.
     pub lx: f64,
+    /// Periodic length in y.
     pub ly: f64,
+    /// Periodic length in z.
     pub lz: f64,
+    /// Origin of the dump cell in x.
     pub xlo: f64,
+    /// Origin of the dump cell in y.
     pub ylo: f64,
+    /// Origin of the dump cell in z.
     pub zlo: f64,
 }
 
 impl OrthoBox {
+    /// Box with origin at zero.
     pub fn new(lx: f64, ly: f64, lz: f64) -> Result<Self, super::Error> {
         Self::with_origin(lx, ly, lz, 0.0, 0.0, 0.0)
     }
 
+    /// Box with an explicit dump-cell origin.
     pub fn with_origin(
         lx: f64,
         ly: f64,
@@ -40,6 +48,7 @@ impl OrthoBox {
         })
     }
 
+    /// Fold a point into `[0, L)` relative to the origin.
     #[inline]
     pub fn wrap(&self, x: f64, y: f64, z: f64) -> [f64; 3] {
         [

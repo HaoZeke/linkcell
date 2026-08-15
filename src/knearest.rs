@@ -6,7 +6,9 @@ use crate::Error;
 /// One source's k nearest neighbours, nearest first.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Neighbors {
+    /// Candidate indices into the input point list.
     pub indices: Vec<usize>,
+    /// Squared minimum-image distances, parallel to [`Self::indices`].
     pub dist2: Vec<f64>,
 }
 
