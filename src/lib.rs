@@ -10,13 +10,13 @@
 
 #![deny(missing_docs)]
 
+mod cell;
 mod error;
 mod knearest;
-mod ortho;
 
+pub use cell::Cell;
 pub use error::Error;
 pub use knearest::{knearest, knearest_brute, Neighbors};
-pub use ortho::OrthoBox;
 
 #[cfg(feature = "capi")]
 mod capi;

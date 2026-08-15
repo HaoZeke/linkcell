@@ -18,19 +18,34 @@ extern "C" {
  *     threads after concurrent failures.
  */
 
-typedef struct lc_box {
-  double lx;
-  double ly;
-  double lz;
-  double xlo;
-  double ylo;
-  double zlo;
-} lc_box;
+typedef struct lc_cell {
+  double ax, ay, az;
+  double bx, by, bz;
+  double cx, cy, cz;
+  double ox, oy, oz;
+} lc_cell;
+
+static inline lc_cell lc_cell_ortho(double lx, double ly, double lz) {
+  lc_cell c;
+  c.ax = lx;
+  c.ay = 0.0;
+  c.az = 0.0;
+  c.bx = 0.0;
+  c.by = ly;
+  c.bz = 0.0;
+  c.cx = 0.0;
+  c.cy = 0.0;
+  c.cz = lz;
+  c.ox = 0.0;
+  c.oy = 0.0;
+  c.oz = 0.0;
+  return c;
+}
 
 const char *lc_version(void);
 const char *lc_last_error(void);
 
-int lc_knearest(const double *xyz, int n, const lc_box *simbox, int k,
+int lc_knearest(const double *xyz, int n, const lc_cell *simbox, int k,
                 const int *mask, double cell_hint, int *out_nn);
 
 #ifdef __cplusplus

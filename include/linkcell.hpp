@@ -14,23 +14,30 @@
 
 namespace linkcell {
 
-struct Box {
-  double lx{};
-  double ly{};
-  double lz{};
-  double xlo{0.0};
-  double ylo{0.0};
-  double zlo{0.0};
+struct Cell {
+  std::array<double, 3> a{};
+  std::array<double, 3> b{};
+  std::array<double, 3> c{};
+  std::array<double, 3> origin{};
 
-  lc_box raw() const {
-    return lc_box{lx, ly, lz, xlo, ylo, zlo};
+  static Cell ortho(double lx, double ly, double lz) {
+    Cell cell;
+    cell.a = {lx, 0.0, 0.0};
+    cell.b = {0.0, ly, 0.0};
+    cell.c = {0.0, 0.0, lz};
+    return cell;
+  }
+
+  lc_cell raw() const {
+    return lc_cell{a[0], a[1], a[2], b[0], b[1], b[2],
+                   c[0], c[1], c[2], origin[0], origin[1], origin[2]};
   }
 };
 
 /// k-nearest neighbour indices, nearest first. Empty row if the point
 /// was masked or isolated.
 inline std::vector<std::vector<int>>
-knearest(const std::vector<std::array<double, 3>> &xyz, const Box &box, int k,
+knearest(const std::vector<std::array<double, 3>> &xyz, const Cell &box, int k,
          const int *mask = nullptr, double cell_hint = 0.0) {
   const int n = static_cast<int>(xyz.size());
   if (n == 0) {
@@ -44,7 +51,7 @@ knearest(const std::vector<std::array<double, 3>> &xyz, const Box &box, int k,
   }
   std::vector<int> out(static_cast<std::size_t>(n) * static_cast<std::size_t>(k),
                        -1);
-  const lc_box raw = box.raw();
+  const lc_cell raw = box.raw();
   if (lc_knearest(packed.data(), n, &raw, k, mask, cell_hint, out.data()) !=
       0) {
     const char *msg = lc_last_error();

@@ -24,9 +24,15 @@ and include `include/linkcell.h` or `include/linkcell.hpp`.
 ## Rust
 
 ```rust
-use linkcell::{knearest, OrthoBox};
+use linkcell::{knearest, Cell};
 
-let sim = OrthoBox::new(10.0, 10.0, 10.0)?;
+let sim = Cell::ortho(10.0, 10.0, 10.0)?;
+let sheared = Cell::from_vectors(
+    [10.0, 0.0, 0.0],
+    [5.0, 8.66, 0.0],
+    [0.0, 0.0, 10.0],
+    [0.0, 0.0, 0.0],
+)?;
 let xyz = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]];
 let rows = knearest(&xyz, &sim, 1, None, None)?;
 assert_eq!(rows[0].indices, vec![1]);
@@ -39,7 +45,7 @@ assert_eq!(rows[0].indices, vec![1]);
 
 ```c
 double xyz[] = {0.0, 0.0, 0.0, 1.0, 0.0, 0.0};
-lc_box box = {.lx = 10, .ly = 10, .lz = 10};
+lc_cell box = lc_cell_ortho(10, 10, 10);
 int out[2];
 lc_knearest(xyz, 2, &box, 1, NULL, 0.0, out);
 ```
@@ -49,8 +55,11 @@ are `out[i*k + 0 ..]`, nearest first.
 
 ## Design
 
-- Orthorhombic periodic boxes only. Triclinic cells are a later crate
-  revision, not a silent approximation.
+- The cell is a general parallelepiped: three lattice vectors plus an
+  origin. Orthorhombic boxes are `Cell::ortho` / `lc_cell_ortho`.
+  Distances use the fractional minimum image `s = H^{-1} (r_j - r_i)`,
+  wrapped to the central cell. Binning is in fractional space, so a
+  sheared dump is not treated as orthogonal.
 - Distances are minimum-image, the same folding a LAMMPS dump box uses.
 - The search does not take a cutoff. A cell-size hint only sets the bin
   width. Shells grow until the k-heap is exact.

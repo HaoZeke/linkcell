@@ -3,7 +3,7 @@
 
 int main(void) {
   double xyz[] = {0.0, 0.0, 0.0, 1.0, 0.0, 0.0};
-  lc_box box = {.lx = 10.0, .ly = 10.0, .lz = 10.0};
+  lc_cell box = lc_cell_ortho(10.0, 10.0, 10.0);
   int out[2];
   if (lc_knearest(xyz, 2, &box, 1, NULL, 0.0, out) != 0) {
     fprintf(stderr, "%s\n", lc_last_error());

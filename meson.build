@@ -22,7 +22,7 @@ endif
 
 linkcell_cargo = custom_target(
   'linkcell-cargo',
-  input: files('Cargo.toml', 'src/lib.rs', 'src/knearest.rs', 'src/ortho.rs', 'src/error.rs', 'src/capi.rs'),
+  input: files('Cargo.toml', 'src/lib.rs', 'src/knearest.rs', 'src/cell.rs', 'src/error.rs', 'src/capi.rs'),
   output: cargo_lib_name,
   command: [
     py, '-c',

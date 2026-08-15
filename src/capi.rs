@@ -4,24 +4,36 @@ use std::ffi::{c_char, c_int, CString};
 use std::ptr;
 use std::sync::Mutex;
 
-use crate::{knearest, OrthoBox};
+use crate::{knearest, Cell};
 
-/// Orthorhombic periodic box. Lengths must be positive.
+/// Periodic parallelepiped. Lattice vectors are a, b, c (same as vesin rows).
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
-pub struct lc_box {
-    /// Edge length x.
-    pub lx: f64,
-    /// Edge length y.
-    pub ly: f64,
-    /// Edge length z.
-    pub lz: f64,
-    /// Origin x of the dump cell.
-    pub xlo: f64,
-    /// Origin y of the dump cell.
-    pub ylo: f64,
-    /// Origin z of the dump cell.
-    pub zlo: f64,
+pub struct lc_cell {
+    /// Lattice vector a, x.
+    pub ax: f64,
+    /// Lattice vector a, y.
+    pub ay: f64,
+    /// Lattice vector a, z.
+    pub az: f64,
+    /// Lattice vector b, x.
+    pub bx: f64,
+    /// Lattice vector b, y.
+    pub by: f64,
+    /// Lattice vector b, z.
+    pub bz: f64,
+    /// Lattice vector c, x.
+    pub cx: f64,
+    /// Lattice vector c, y.
+    pub cy: f64,
+    /// Lattice vector c, z.
+    pub cz: f64,
+    /// Origin x.
+    pub ox: f64,
+    /// Origin y.
+    pub oy: f64,
+    /// Origin z.
+    pub oz: f64,
 }
 
 static LAST_ERROR: Mutex<Option<CString>> = Mutex::new(None);
@@ -61,7 +73,7 @@ pub extern "C" fn lc_version() -> *const c_char {
 pub unsafe extern "C" fn lc_knearest(
     xyz: *const f64,
     n: c_int,
-    simbox: *const lc_box,
+    simbox: *const lc_cell,
     k: c_int,
     mask: *const c_int,
     cell_hint: f64,
@@ -82,8 +94,11 @@ pub unsafe extern "C" fn lc_knearest(
     let n_us = n as usize;
     let k_us = k as usize;
     let box_c = *simbox;
-    let sim = match OrthoBox::with_origin(
-        box_c.lx, box_c.ly, box_c.lz, box_c.xlo, box_c.ylo, box_c.zlo,
+    let sim = match Cell::from_vectors(
+        [box_c.ax, box_c.ay, box_c.az],
+        [box_c.bx, box_c.by, box_c.bz],
+        [box_c.cx, box_c.cy, box_c.cz],
+        [box_c.ox, box_c.oy, box_c.oz],
     ) {
         Ok(b) => b,
         Err(e) => {

@@ -1,6 +1,6 @@
 //! Linked-cell k-nearest search (Allen and Tildesley).
 
-use crate::ortho::OrthoBox;
+use crate::cell::Cell;
 use crate::Error;
 
 /// One source's k nearest neighbours, nearest first.
@@ -19,7 +19,7 @@ pub struct Neighbors {
 /// as the box. Each row has `min(k, n_active - 1)` entries.
 pub fn knearest(
     xyz: &[[f64; 3]],
-    simbox: &OrthoBox,
+    simbox: &Cell,
     k: usize,
     mask: Option<&[bool]>,
     cell_hint: Option<f64>,
@@ -42,30 +42,28 @@ pub fn knearest(
     if !(edge > 0.0) {
         edge = 3.0;
     }
-    edge = edge
-        .min(simbox.lx)
-        .min(simbox.ly)
-        .min(simbox.lz);
+    let w = simbox.widths();
+    edge = edge.min(w[0]).min(w[1]).min(w[2]);
 
-    let nx = (simbox.lx / edge).floor().max(1.0) as i32;
-    let ny = (simbox.ly / edge).floor().max(1.0) as i32;
-    let nz = (simbox.lz / edge).floor().max(1.0) as i32;
+    let nx = (w[0] / edge).floor().max(1.0) as i32;
+    let ny = (w[1] / edge).floor().max(1.0) as i32;
+    let nz = (w[2] / edge).floor().max(1.0) as i32;
     let ncell = (nx * ny * nz) as usize;
-    let invx = f64::from(nx) / simbox.lx;
-    let invy = f64::from(ny) / simbox.ly;
-    let invz = f64::from(nz) / simbox.lz;
-    let cell_min = (simbox.lx / f64::from(nx))
-        .min(simbox.ly / f64::from(ny))
-        .min(simbox.lz / f64::from(nz));
+    let invx = f64::from(nx);
+    let invy = f64::from(ny);
+    let invz = f64::from(nz);
+    let cell_min = (w[0] / f64::from(nx))
+        .min(w[1] / f64::from(ny))
+        .min(w[2] / f64::from(nz));
 
     let mut head = vec![-1isize; ncell];
     let mut next = vec![-1isize; n];
 
     let cell_of = |i: usize| -> (i32, i32, i32) {
-        let w = simbox.wrap(xyz[i][0], xyz[i][1], xyz[i][2]);
-        let ix = ((w[0] * invx) as i32).clamp(0, nx - 1);
-        let iy = ((w[1] * invy) as i32).clamp(0, ny - 1);
-        let iz = ((w[2] * invz) as i32).clamp(0, nz - 1);
+        let s = simbox.fractional(xyz[i]);
+        let ix = ((s[0] * invx) as i32).clamp(0, nx - 1);
+        let iy = ((s[1] * invy) as i32).clamp(0, ny - 1);
+        let iz = ((s[2] * invz) as i32).clamp(0, nz - 1);
         (ix, iy, iz)
     };
     let cell_index = |mut ix: i32, mut iy: i32, mut iz: i32| -> usize {
@@ -159,7 +157,7 @@ pub fn knearest(
 /// Brute-force k-nearest. Tests and small systems only.
 pub fn knearest_brute(
     xyz: &[[f64; 3]],
-    simbox: &OrthoBox,
+    simbox: &Cell,
     k: usize,
     mask: Option<&[bool]>,
 ) -> Result<Vec<Neighbors>, Error> {
