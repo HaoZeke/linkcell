@@ -83,6 +83,8 @@ pub fn knearest(
     }
 
     let max_reach = nx.max(ny).max(nz) / 2 + 1;
+    let mut seen = vec![0u32; ncell];
+    let mut stamp: u32 = 1;
     let mut out = vec![Neighbors::default(); n];
 
     for &i in &active {
@@ -90,6 +92,11 @@ pub fn knearest(
         let mut heap: std::collections::BinaryHeap<(u64, usize)> =
             std::collections::BinaryHeap::new();
         let (ix, iy, iz) = cell_of(i);
+        stamp = stamp.wrapping_add(1);
+        if stamp == 0 {
+            seen.fill(0);
+            stamp = 1;
+        }
         let mut reach = 1i32;
         while reach <= max_reach {
             for dx in -reach..=reach {
@@ -102,7 +109,12 @@ pub fn knearest(
                         if !shell && reach > 1 {
                             continue;
                         }
-                        let mut j = head[cell_index(ix + dx, iy + dy, iz + dz)];
+                        let c = cell_index(ix + dx, iy + dy, iz + dz);
+                        if seen[c] == stamp {
+                            continue;
+                        }
+                        seen[c] = stamp;
+                        let mut j = head[c];
                         while j >= 0 {
                             let ju = j as usize;
                             if ju != i {
