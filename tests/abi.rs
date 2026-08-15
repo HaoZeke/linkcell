@@ -94,7 +94,7 @@ fn safe_and_c_abi_write_the_same_packed_row() {
     };
     assert_eq!(rc, 0);
     assert_eq!(c_out, rust_out);
-    assert!(unsafe { linkcell::lc_last_error() }.is_null());
+    assert!(linkcell::lc_last_error().is_null());
 }
 
 #[test]

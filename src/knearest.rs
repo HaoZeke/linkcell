@@ -74,7 +74,23 @@ impl KHeap {
         }
     }
 
+    fn idx_at(&self, t: usize) -> usize {
+        if self.k <= 16 {
+            self.idx[t]
+        } else {
+            self.extra_idx[t]
+        }
+    }
+
     fn push(&mut self, d2: f64, j: usize) {
+        for t in 0..self.n {
+            if self.idx_at(t) == j {
+                if d2 < self.d2_at(t) {
+                    self.set(t, d2, j);
+                }
+                return;
+            }
+        }
         if self.n < self.k {
             self.set(self.n, d2, j);
             self.n += 1;

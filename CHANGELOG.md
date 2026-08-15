@@ -16,6 +16,9 @@ ABI break. Existing 0.1.x C and C++ callers must rebuild.
 - Rust `Error::Empty` is an empty point list only. A wrong-length
   `knearest_into` buffer is `Error::BufferSize`. An overflowing
   linked-cell mesh is `Error::TooManyCells`.
+- The per-source k-set keeps one image of each neighbour (the
+  nearest). The same particle visited through two wraps does not
+  occupy two slots.
 
 ## 0.1.2
 
