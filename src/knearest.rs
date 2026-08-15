@@ -16,6 +16,16 @@
 use crate::cell::Cell;
 use crate::Error;
 
+const MAX_CELLS: i64 = 16_777_216;
+
+fn bins_1d(width: f64, edge: f64) -> Result<i32, Error> {
+    let n = (width / edge).floor().max(1.0);
+    if !n.is_finite() || n > 1_000_000.0 {
+        return Err(Error::TooManyCells);
+    }
+    Ok(n as i32)
+}
+
 /// Bounded max-heap of `(dist2, index)`. `k <= 16` stays in
 /// `[f64; 16]` / `[usize; 16]` so the pair loop does not allocate;
 /// larger `k` uses `extra_*` vectors.
@@ -234,10 +244,14 @@ fn search(
     let w = simbox.widths();
     edge = edge.min(w[0]).min(w[1]).min(w[2]);
 
-    let nx = (w[0] / edge).floor().max(1.0) as i32;
-    let ny = (w[1] / edge).floor().max(1.0) as i32;
-    let nz = (w[2] / edge).floor().max(1.0) as i32;
-    let ncell = (nx * ny * nz) as usize;
+    let nx = bins_1d(w[0], edge)?;
+    let ny = bins_1d(w[1], edge)?;
+    let nz = bins_1d(w[2], edge)?;
+    let ncell = (i64::from(nx))
+        .checked_mul(i64::from(ny))
+        .and_then(|v| v.checked_mul(i64::from(nz)))
+        .filter(|&v| v > 0 && v <= MAX_CELLS)
+        .ok_or(Error::TooManyCells)? as usize;
     let invx = f64::from(nx);
     let invy = f64::from(ny);
     let invz = f64::from(nz);

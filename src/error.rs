@@ -13,15 +13,18 @@ pub enum Error {
     Empty,
     /// Caller `out` length is not `n * k`.
     BufferSize,
+    /// Linked-cell mesh would overflow or exceed the bin cap.
+    TooManyCells,
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Error::ZeroK => write!(f, "k must be at least 1"),
-            Error::BadBox => write!(f, "box lengths must be positive"),
+            Error::BadBox => write!(f, "singular or non-positive cell"),
             Error::Empty => write!(f, "no points"),
             Error::BufferSize => write!(f, "out buffer length must be n * k"),
+            Error::TooManyCells => write!(f, "linked-cell mesh is too fine"),
         }
     }
 }

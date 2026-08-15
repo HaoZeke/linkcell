@@ -149,6 +149,11 @@ pub unsafe extern "C" fn lc_knearest(
     let Some(need) = n.checked_mul(k) else {
         return fail(Error::BufferSize);
     };
+    let max_xyz = (isize::MAX as usize) / 3;
+    let max_out = (isize::MAX as usize) / std::mem::size_of::<c_int>();
+    if n > max_xyz || need > max_out {
+        return fail(Error::BufferSize);
+    };
     // SAFETY: simbox is non-null, aligned, and points at one valid lc_cell.
     let box_c = unsafe { *simbox };
     let sim = match Cell::from_vectors(

@@ -98,13 +98,6 @@ public:
     }
   }
 
-  Neighbours(const std::vector<int> &idx, std::size_t n, std::size_t k)
-      : Neighbours(idx.data(), n, k) {
-    if (idx.size() != n * k) {
-      throw Error("neighbour buffer length must be n * k");
-    }
-  }
-
   /// j-th neighbour of source i, or -1 if missing.
   [[nodiscard]] int neighbour(std::size_t i, std::size_t j) const {
     if (i >= n_ || j >= k_) {

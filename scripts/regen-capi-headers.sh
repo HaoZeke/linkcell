@@ -32,7 +32,7 @@ fi
 
 if [[ "${CHECK_ONLY}" -eq 1 ]]; then
     tmp="$(mktemp)"
-    trap 'rtrash -f "${tmp}"' EXIT
+    trap 'rm -f "${tmp}"' EXIT
     cbindgen \
         --config "${ROOT_DIR}/cbindgen.toml" \
         --crate linkcell \
