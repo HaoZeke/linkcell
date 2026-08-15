@@ -1,0 +1,14 @@
+cff-version: 1.2.0
+title: linkcell
+message: If you use this software, please cite it as below.
+type: software
+authors:
+  - family-names: Goswami
+    given-names: Rohit
+    orcid: https://orcid.org/0000-0002-2393-8056
+license: MIT
+version: 0.1.0
+abstract: >-
+  Periodic linked-cell k-nearest neighbour search for
+  molecular simulations. Rust implementation, C ABI,
+  C++ RAII header.
