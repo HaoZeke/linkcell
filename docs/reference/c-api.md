@@ -48,10 +48,11 @@ const char *lc_version(void);
 ```
 
 Both return pointers the caller must not free. `lc_last_error` is
-thread-local and `NULL` after a successful `lc_*` call on that thread.
-The pointer is invalid after the next `lc_*` call on the same thread.
-Distinct searches may run concurrently; each thread reads its own
-slot. `lc_version` is process-static.
+thread-local and `NULL` after a successful `lc_knearest` on that
+thread, or if none has failed yet. `lc_version` does not read or write
+the slot. The pointer is invalid after the next `lc_knearest` on the
+same thread. Distinct searches may run concurrently; each thread reads
+its own slot. `lc_version` is process-static.
 
 ## C++ wrap
 
@@ -75,18 +76,22 @@ class Neighbours {
   const int *data() const;
 };
 
+void knearest_into(const double *xyz, std::size_t n, const Cell &cell,
+                   std::size_t k, int *out, std::size_t out_len,
+                   const int *mask = nullptr, double cell_hint = 0.0);
+
 Neighbours knearest(const double *xyz, std::size_t n, const Cell &cell,
-                    std::size_t k, int *out,
-                    const int *mask = nullptr, double cell_hint = 0.0);
+                    std::size_t k, const int *mask = nullptr,
+                    double cell_hint = 0.0);
 
 const char *version();
 }
 ```
 
-`knearest` writes the same packed `n * k` buffer as `lc_knearest` and
-returns a non-owning `Neighbours` view. It does not return
-`std::vector<std::vector<int>>`. An overload without `out` allocates
-`std::vector<int>`. Failure throws `linkcell::Error`. Requires C++17.
+`knearest` returns an owning packed `Neighbours` (`n * k` ints).
+`knearest_into` writes a caller buffer and requires `out_len == n * k`.
+Neither returns `std::vector<std::vector<int>>`. Failure throws
+`linkcell::Error`. Requires C++17.
 
 ## Rust errors (same crate)
 
@@ -98,6 +103,9 @@ returns a non-owning `Neighbours` view. It does not return
 | `BadBox` | A box length is not strictly positive, or H is singular |
 | `Empty` | The point list is empty |
 | `BufferSize` | `knearest_into` / `out` length is not `n * k` |
+| `MaskLen` | `mask` is `Some` and `mask.len() != n` |
+| `TooManyCells` | linked-cell mesh overflows the bin cap |
+| `Overflow` | `n * k` does not fit a slice |
 
 `Error::Empty` is not a wrong-length buffer.
 

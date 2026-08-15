@@ -4,10 +4,10 @@
 #include <exception>
 #include <iostream>
 
-// Neighbours of source i sit at out[i * k + j]. Unused slots are -1.
+// Neighbours of source i sit at nn.neighbour(i, j). Unused slots are -1.
 static int run(const char *label, const double *xyz, std::size_t n,
-               const linkcell::Cell &box, std::size_t k, int *out) {
-  const linkcell::Neighbours nn = linkcell::knearest(xyz, n, box, k, out);
+               const linkcell::Cell &box, std::size_t k) {
+  const linkcell::Neighbours nn = linkcell::knearest(xyz, n, box, k);
   std::cout << label << "\n";
   for (std::size_t i = 0; i < n; ++i) {
     std::cout << i << " ->";
@@ -33,10 +33,8 @@ int main() {
       {10.0, 0.0, 0.0}, {5.0, 8.66, 0.0}, {0.0, 0.0, 10.0});
 
   try {
-    int out_ortho[2];
-    int out_sheared[2];
-    if (run("ortho", xyz, n, ortho, k, out_ortho) != 0 ||
-        run("sheared", xyz, n, sheared, k, out_sheared) != 0) {
+    if (run("ortho", xyz, n, ortho, k) != 0 ||
+        run("sheared", xyz, n, sheared, k) != 0) {
       return 1;
     }
   } catch (const std::exception &e) {

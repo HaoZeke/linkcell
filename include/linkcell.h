@@ -6,7 +6,8 @@
  * Memory ownership
  *   - lc_knearest writes into caller-owned out_nn (length n * k).
  *   - lc_last_error returns a thread-local pointer. Do not free. The
- *     pointer is invalid after the next lc_* call on the same thread.
+ *     pointer is invalid after the next lc_knearest on the same thread.
+ *     lc_version does not read or write the slot.
  *   - lc_version returns a process-static pointer. Do not free.
  *
  * Thread safety
@@ -127,13 +128,14 @@ int lc_knearest(const double *xyz,
                 int *out_nn);
 
 /**
- * Thread-local last-error string from this thread's most recent `lc_*` call.
+ * Thread-local last-error string from this thread's most recent
+ * [`lc_knearest`].
  *
- * Returns a pointer to a NUL-terminated UTF-8 C string, or `NULL` if the
- * last call on this thread succeeded (or no call has failed yet).
- * The string is thread-local: distinct threads have independent slots.
- * The pointer is valid until the next `lc_*` call on this thread.
- * Do not free it.
+ * Returns a pointer to a NUL-terminated UTF-8 C string, or `NULL` if
+ * the last `lc_knearest` on this thread succeeded, or if none has
+ * failed yet. [`lc_version`] does not read or write the slot.
+ * Distinct threads have independent slots. The pointer is valid until
+ * the next `lc_knearest` on this thread. Do not free it.
  */
 const char *lc_last_error(void);
 

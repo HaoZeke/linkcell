@@ -5,6 +5,13 @@
 ### 0.2.1
 
 - `Error::MaskLen` when `mask` is `Some` and `mask.len() != n`.
+- `Error::Overflow` when `n * k` does not fit a slice. `BufferSize`
+  remains a caller `out` whose length is not `n * k`.
+- `lc_last_error` is written only by `lc_knearest`. `lc_version` does
+  not clear the slot. An interior NUL in a message no longer drops the
+  string to `NULL`.
+- C++ `Neighbours` owns the packed `n * k` buffer. `knearest_into`
+  takes `out_len`. There is no 5-argument `knearest(..., int *out)`.
 - CI checks `include/linkcell.h` against cbindgen 0.29.4.
 
 ### 0.2.0

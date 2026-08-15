@@ -44,7 +44,10 @@ thread_local! {
 
 fn set_error(msg: &str) {
     LAST_ERROR.with(|slot| {
-        *slot.borrow_mut() = CString::new(msg).ok();
+        let cstr = CString::new(msg).unwrap_or_else(|_| {
+            CString::new("error message contained NUL").expect("fallback has no NUL")
+        });
+        *slot.borrow_mut() = Some(cstr);
     });
 }
 
@@ -64,13 +67,14 @@ fn fail_msg(msg: &str) -> c_int {
     1
 }
 
-/// Thread-local last-error string from this thread's most recent `lc_*` call.
+/// Thread-local last-error string from this thread's most recent
+/// [`lc_knearest`].
 ///
-/// Returns a pointer to a NUL-terminated UTF-8 C string, or `NULL` if the
-/// last call on this thread succeeded (or no call has failed yet).
-/// The string is thread-local: distinct threads have independent slots.
-/// The pointer is valid until the next `lc_*` call on this thread.
-/// Do not free it.
+/// Returns a pointer to a NUL-terminated UTF-8 C string, or `NULL` if
+/// the last `lc_knearest` on this thread succeeded, or if none has
+/// failed yet. [`lc_version`] does not read or write the slot.
+/// Distinct threads have independent slots. The pointer is valid until
+/// the next `lc_knearest` on this thread. Do not free it.
 #[no_mangle]
 pub extern "C" fn lc_last_error() -> *const c_char {
     LAST_ERROR.with(|slot| {
@@ -134,12 +138,12 @@ pub unsafe extern "C" fn lc_knearest(
         return fail_msg("null pointer");
     }
     let Some(need) = n.checked_mul(k) else {
-        return fail(Error::BufferSize);
+        return fail(Error::Overflow);
     };
     let max_xyz = (isize::MAX as usize) / 3;
     let max_out = (isize::MAX as usize) / std::mem::size_of::<c_int>();
     if n > max_xyz || need > max_out {
-        return fail(Error::BufferSize);
+        return fail(Error::Overflow);
     };
     // SAFETY: simbox is non-null, aligned, and points at one valid lc_cell.
     let box_c = unsafe { *simbox };

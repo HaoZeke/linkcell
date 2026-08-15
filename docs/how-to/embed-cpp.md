@@ -4,11 +4,10 @@
 does not add a second library. Link the same `staticlib` a C consumer
 links.
 
-`linkcell::knearest` writes packed indices into a caller-owned
-`int *` of length `n * k` and returns a `Neighbours` view over that
-buffer. It does not return `std::vector<std::vector<int>>`. Unused
-slots are `-1`. Failure throws `linkcell::Error` (`std::runtime_error`
-with the C status and the thread-local `lc_last_error` text).
+`linkcell::knearest` returns an owning packed `Neighbours`.
+`knearest_into` writes a caller-owned `int *` and takes `out_len`,
+which must be `n * k`. Neither returns `std::vector<std::vector<int>>`.
+Unused slots are `-1`. Failure throws `linkcell::Error`.
 
 ## Meson wrap
 
@@ -41,8 +40,8 @@ installed prefix.
 
 const linkcell::Cell box = linkcell::Cell::ortho(10.0, 10.0, 10.0);
 const double xyz[] = {0.0, 0.0, 0.0, 1.0, 0.0, 0.0};
-int out[2];
-const linkcell::Neighbours nn = linkcell::knearest(xyz, 2, box, 1, out);
+const linkcell::Neighbours nn = linkcell::knearest(xyz, 2, box, 1);
+int j = nn.neighbour(0, 0);
 ```
 
 A general parallelepiped is `linkcell::Cell::from_vectors(a, b, c,

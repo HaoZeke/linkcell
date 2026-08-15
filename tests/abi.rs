@@ -239,3 +239,61 @@ fn lc_knearest_zero_k_message_is_not_empty() {
     assert_eq!(msg.to_str().unwrap(), "k must be at least 1");
     assert_ne!(msg.to_str().unwrap(), "no points");
 }
+
+#[test]
+fn last_error_slots_are_independent_across_threads() {
+    use std::thread;
+    let a = thread::spawn(|| {
+        let box_c = ortho_c(10.0, 10.0, 10.0);
+        let dummy = 0.0;
+        let mut out = -1;
+        let rc = unsafe { lc_knearest(&dummy, 0, &box_c, 1, std::ptr::null(), 0.0, &mut out) };
+        assert_ne!(rc, 0);
+        let msg = unsafe { std::ffi::CStr::from_ptr(linkcell::lc_last_error()) };
+        assert_eq!(msg.to_str().unwrap(), "no points");
+    });
+    let b = thread::spawn(|| {
+        let box_c = ortho_c(10.0, 10.0, 10.0);
+        let dummy = 0.0;
+        let mut out = -1;
+        let rc = unsafe { lc_knearest(&dummy, 1, &box_c, 0, std::ptr::null(), 0.0, &mut out) };
+        assert_ne!(rc, 0);
+        let msg = unsafe { std::ffi::CStr::from_ptr(linkcell::lc_last_error()) };
+        assert_eq!(msg.to_str().unwrap(), "k must be at least 1");
+    });
+    a.join().unwrap();
+    b.join().unwrap();
+}
+
+#[test]
+fn lc_version_does_not_clear_last_error() {
+    let box_c = ortho_c(10.0, 10.0, 10.0);
+    let dummy = 0.0;
+    let mut out = -1;
+    let rc = unsafe { lc_knearest(&dummy, 0, &box_c, 1, std::ptr::null(), 0.0, &mut out) };
+    assert_ne!(rc, 0);
+    let before = unsafe { std::ffi::CStr::from_ptr(linkcell::lc_last_error()) }
+        .to_str()
+        .unwrap()
+        .to_string();
+    let _v = unsafe { std::ffi::CStr::from_ptr(linkcell::lc_version()) };
+    let after = unsafe { std::ffi::CStr::from_ptr(linkcell::lc_last_error()) }
+        .to_str()
+        .unwrap();
+    assert_eq!(before, "no points");
+    assert_eq!(after, before);
+}
+
+#[test]
+fn c_abi_overflow_is_not_empty() {
+    let box_c = ortho_c(10.0, 10.0, 10.0);
+    let dummy = 0.0;
+    let mut out = -1;
+    let n = (isize::MAX as usize) / 3 + 1;
+    let rc = unsafe { lc_knearest(&dummy, n, &box_c, 1, std::ptr::null(), 0.0, &mut out) };
+    assert_ne!(rc, 0);
+    let msg = unsafe { std::ffi::CStr::from_ptr(linkcell::lc_last_error()) };
+    assert_eq!(msg.to_str().unwrap(), "n * k overflows");
+    assert_ne!(msg.to_str().unwrap(), "no points");
+    assert_ne!(msg.to_str().unwrap(), "out buffer length must be n * k");
+}

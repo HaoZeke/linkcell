@@ -13,6 +13,8 @@ pub enum Error {
     Empty,
     /// Caller `out` length is not `n * k`.
     BufferSize,
+    /// `n * k` does not fit a slice (`usize` or `isize`).
+    Overflow,
     /// `mask` is `Some` and its length is not `n`.
     MaskLen,
     /// Linked-cell mesh would overflow or exceed the bin cap.
@@ -26,6 +28,7 @@ impl fmt::Display for Error {
             Error::BadBox => write!(f, "singular or non-positive cell"),
             Error::Empty => write!(f, "no points"),
             Error::BufferSize => write!(f, "out buffer length must be n * k"),
+            Error::Overflow => write!(f, "n * k overflows"),
             Error::MaskLen => write!(f, "mask length must be n"),
             Error::TooManyCells => write!(f, "linked-cell mesh is too fine"),
         }
