@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.0
+
 Optional gpulite device path: `linkcell::gpu::Workspace::knearest_into`
 writes the same packed `n * k` indices as the host walk (fold, bin,
 Chebyshev shells). The device walk uses a tiled exclusive scan, a precomputed
