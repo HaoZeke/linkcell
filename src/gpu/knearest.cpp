@@ -14,7 +14,6 @@
 using gpulite::CUDART;
 using gpulite::KernelFactory;
 using gpulite::NVRTC;
-using gpulite::dim3;
 
 namespace linkcell {
 namespace gpu {
