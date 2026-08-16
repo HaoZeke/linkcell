@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.2.3
+
+A static `libyodaLib.a` no longer passes `liblinkcell.so` to `ar`.
+The Meson dependency attaches a generated header as the build-order
+edge, not both cargo outputs.
+
 ## 0.2.2
 
 The crate is `d-SEAMS/linkcell`. `HaoZeke/linkcell` redirects.
