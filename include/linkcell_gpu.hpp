@@ -12,7 +12,7 @@
  *  first, unused slots `-1`. The walk is the host algorithm (fold,
  *  bin, Chebyshev shells until the k-th neighbour cannot sit outside
  *  the visited cube). `xyz` and `out` are CUDA device pointers.
- *  `cell` is host. Orthorhombic cells only.
+ *  `cell` is host. General parallelepiped. `k <= 16`.
  *
  *  The workspace keeps the bin arrays across calls (grow on demand).
  *  Built only when the meson `with_gpulite` feature is on.
@@ -39,7 +39,7 @@ public:
                      std::size_t k, int *out, std::size_t out_len,
                      const int *mask = nullptr, double cell_hint = 0.0);
 
-  /// `nFrames` systems that share one orthorhombic cell. `xyz` is
+  /// `nFrames` systems that share one cell. `xyz` is
   /// frame-major `nFrames * n * 3`, `out` is `nFrames * n * k`.
   /// Kernels enqueue on `queue()`; `wait` runs the stream barrier.
   void knearest_into_many(const double *xyz, std::size_t n,

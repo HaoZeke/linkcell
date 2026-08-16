@@ -15,7 +15,8 @@ lattice vectors. vesin and LAMMPS call those copies ghosts.
 
 `Cell::lattice_shift(na, nb, nc)` is that translation. The pair
 loop is `dist2_shifted`: `|q + shift - p|^2`. No wrap, no `Hinv`,
-one subtract.
+one subtract. The device walk uses the same shift: `na a + nb b +
+nc c`. Orthorhombic boxes keep the cheap path (`H` diagonal).
 
 Orthorhombic boxes skip the two 3x3 matvecs everywhere they can:
 `fractional` divides by the three widths, `lattice_shift` multiplies

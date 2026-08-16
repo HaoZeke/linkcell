@@ -82,4 +82,5 @@ table (LAMMPS `NStencil`, HOOMD `d_cell_adj`), not a nested 3-D
 loop. Eight threads share each source and stride occupants; after
 each shell they merge heaps and apply the host stop. Output is
 Cabana's 2-D packed `n * k` list. `knearest_into_many` covers every
-frame that shares a cell. Orthorhombic cells only; `k <= 16`.
+frame that shares a cell. Fold uses `Hinv`; the pair shift is
+`na a + nb b + nc c`. `k <= 16`.
