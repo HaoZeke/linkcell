@@ -362,8 +362,28 @@ struct Workspace::Impl {
   int capC = 0;
   int capSt = 0;
   int cachedReach = -1;
+  cudaStream_t stream = nullptr;
   DevPtr dcellOf, dcellCount, dcellOff, dorder, dfolded, dsorted, dhome;
   DevPtr dsdx, dsdy, dsdz, dreachOff;
+
+  void ensureStream() {
+    if (stream == nullptr) {
+      checkCuda(CUDART::instance().cudaStreamCreate(&stream), "stream");
+    }
+  }
+
+  void sync() {
+    if (stream != nullptr) {
+      checkCuda(CUDART::instance().cudaStreamSynchronize(stream), "stream wait");
+    }
+  }
+
+  ~Impl() {
+    if (stream != nullptr && CUDART::loaded()) {
+      CUDART::instance().cudaStreamSynchronize(stream);
+      CUDART::instance().cudaStreamDestroy(stream);
+    }
+  }
 
   void ensure(int nTot, int nCtot, int nOff) {
     if (nTot > capN) {
@@ -430,16 +450,24 @@ Workspace &Workspace::operator=(Workspace &&o) noexcept {
   return *this;
 }
 
+void *Workspace::queue() {
+  impl_->ensureStream();
+  return impl_->stream;
+}
+
+void Workspace::wait() { impl_->sync(); }
+
 void Workspace::knearest_into(const double *xyz, std::size_t n, const Cell &cell,
                               std::size_t k, int *out, std::size_t out_len,
                               const int *mask, double cell_hint) {
-  knearest_into_many(xyz, n, 1, cell, k, out, out_len, mask, cell_hint);
+  knearest_into_many(xyz, n, 1, cell, k, out, out_len, mask, cell_hint, true);
 }
 
 void Workspace::knearest_into_many(const double *xyz, std::size_t n,
                                    std::size_t nFrames, const Cell &cell,
                                    std::size_t k, int *out, std::size_t out_len,
-                                   const int *mask, double cell_hint) {
+                                   const int *mask, double cell_hint,
+                                   bool wait) {
   if (!available()) {
     throw Error("CUDA driver or nvrtc not loaded");
   }
@@ -499,6 +527,7 @@ void Workspace::knearest_into_many(const double *xyz, std::size_t n,
 
   impl_->ensure(nTot, nCtot, nOff);
   impl_->ensureStencil(maxReach);
+  impl_->ensureStream();
   auto &rt = CUDART::instance();
   checkCuda(rt.cudaMemset(impl_->dcellCount.p, 0,
                           static_cast<std::size_t>(nCtot) * sizeof(int)),
@@ -550,12 +579,13 @@ void Workspace::knearest_into_many(const double *xyz, std::size_t n,
                    &impl_->dcellCount.p,
                    &impl_->dfolded.p};
     auto a = launchArgs(raw, sizeof(raw) / sizeof(raw[0]));
-    kBin->launch(dim3(grid), dim3(block), 0, nullptr, a, true);
+    kBin->launch(dim3(grid), dim3(block), 0, impl_->stream, a, false);
   }
   {
     void *raw[] = {&impl_->dcellCount.p, &impl_->dcellOff.p, &nCv, &nF};
     auto a = launchArgs(raw, sizeof(raw) / sizeof(raw[0]));
-    kPref->launch(dim3(nF), dim3(128), 128 * sizeof(int), nullptr, a, true);
+    kPref->launch(dim3(nF), dim3(128), 128 * sizeof(int), impl_->stream, a,
+                  false);
   }
   {
     void *raw[] = {&impl_->dfolded.p,    &impl_->dcellOf.p, &impl_->dcellCount.p,
@@ -563,7 +593,7 @@ void Workspace::knearest_into_many(const double *xyz, std::size_t n,
                    &impl_->dhome.p,      &nI,               &nF,
                    &nCv};
     auto a = launchArgs(raw, sizeof(raw) / sizeof(raw[0]));
-    kScat->launch(dim3(grid), dim3(block), 0, nullptr, a, true);
+    kScat->launch(dim3(grid), dim3(block), 0, impl_->stream, a, false);
   }
   {
     void *raw[] = {&impl_->dsorted.p,   &impl_->dcellOf.p, &impl_->dcellOff.p,
@@ -575,7 +605,10 @@ void Workspace::knearest_into_many(const double *xyz, std::size_t n,
                    &cmin,               &kI,               &maxR,
                    &outP};
     auto a = launchArgs(raw, sizeof(raw) / sizeof(raw[0]));
-    kNear->launch(dim3(tppGrid), dim3(block), sh, nullptr, a, true);
+    kNear->launch(dim3(tppGrid), dim3(block), sh, impl_->stream, a, false);
+  }
+  if (wait) {
+    impl_->sync();
   }
 }
 

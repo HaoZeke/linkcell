@@ -41,10 +41,17 @@ public:
 
   /// `nFrames` systems that share one orthorhombic cell. `xyz` is
   /// frame-major `nFrames * n * 3`, `out` is `nFrames * n * k`.
+  /// Kernels enqueue on `queue()`; `wait` runs the stream barrier.
   void knearest_into_many(const double *xyz, std::size_t n,
                           std::size_t nFrames, const Cell &cell, std::size_t k,
                           int *out, std::size_t out_len,
-                          const int *mask = nullptr, double cell_hint = 0.0);
+                          const int *mask = nullptr, double cell_hint = 0.0,
+                          bool wait = true);
+
+  /// Persistent CUDA stream for this workspace. All device work is
+  /// enqueued here; call `wait()` before reading device results.
+  void *queue();
+  void wait();
 
 private:
   struct Impl;
