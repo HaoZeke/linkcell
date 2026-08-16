@@ -13,8 +13,10 @@
 - C++ `Neighbours` owns the packed `n * k` buffer. `knearest_into`
   takes `out_len`. There is no 5-argument `knearest(..., int *out)`.
 - CI checks `include/linkcell.h` against cbindgen 0.29.4.
+- Branding: sheared linked cells, k=4 neighbours, periodic wrap
+  (`assets/branding/`).
 
-### 0.2.0
+## 0.2.0
 
 ABI break. Existing 0.1.x C and C++ callers must rebuild.
 
