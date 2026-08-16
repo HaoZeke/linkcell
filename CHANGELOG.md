@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.2.2
+
+The crate is `d-SEAMS/linkcell`. `HaoZeke/linkcell` redirects.
+
 ## 0.2.1
 
 - `Error::MaskLen` when `mask` is `Some` and `mask.len() != n`.

@@ -15,7 +15,7 @@ on the same thread and do not free the pointer.
 ```
 [wrap-git]
 url = https://github.com/d-SEAMS/linkcell.git
-revision = v0.2.0
+revision = v0.2.2
 depth = 1
 
 [provide]
