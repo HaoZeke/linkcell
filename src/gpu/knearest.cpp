@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstddef>
 #include <stdexcept>
 #include <string>
@@ -533,6 +534,7 @@ void Workspace::knearest_into_many(const double *xyz, std::size_t n,
   checkCuda(rt.cudaMemset(impl_->dcellCount.p, 0,
                           static_cast<std::size_t>(nCtot) * sizeof(int)),
             "zero cells");
+  checkCuda(rt.cudaDeviceSynchronize(), "setup");
 
   auto &factory = KernelFactory::instance(0);
   const std::vector<std::string> opt{"-std=c++17"};
@@ -581,6 +583,19 @@ void Workspace::knearest_into_many(const double *xyz, std::size_t n,
         tpp = tp;
         block = blk;
       }
+    }
+  }
+  if (const char *envTpp = std::getenv("LINKCELL_TPP")) {
+    const int v = std::atoi(envTpp);
+    if (v >= 1 && v <= 32 && block % v == 0) {
+      tpp = v;
+    }
+  }
+  if (const char *envBlk = std::getenv("LINKCELL_BLOCK")) {
+    const int v = std::atoi(envBlk);
+    if (v >= 32 && v <= maxThreads && v % 32 == 0 && v % tpp == 0 &&
+        shBytes(v, tpp) <= kMaxSh) {
+      block = v;
     }
   }
   const int grid = (nTot + block - 1) / block;
