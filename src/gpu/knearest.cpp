@@ -23,6 +23,7 @@ constexpr int kMaxK = 16;
 constexpr int kMaxCells = 262144;
 
 const char *kKernels = R"CUDA(
+#define TPP 8
 __device__ inline int remEuclid(int a, int n) {
   int r = a % n;
   return r < 0 ? r + n : r;
@@ -34,48 +35,84 @@ __device__ inline int divEuclid(int a, int n) {
   return q;
 }
 
-extern "C" __global__ void bin_atoms(const double* __restrict__ xyz,
-    const int* __restrict__ mask, int n, double lx, double ly, double lz,
-    double ox, double oy, double oz, int nx, int ny, int nz,
-    int* __restrict__ cellOf, int* __restrict__ cellCount,
-    double* __restrict__ folded) {
-  const int i = blockIdx.x * blockDim.x + threadIdx.x;
-  if (i >= n) return;
-  if (mask && mask[i] == 0) {
-    cellOf[i] = -1;
-    folded[i * 3 + 0] = 0;
-    folded[i * 3 + 1] = 0;
-    folded[i * 3 + 2] = 0;
+__device__ inline void heapPush(double* bestR2, int* bestJ, int* found, int k,
+    double r2, int j) {
+  int have = -1;
+  for (int t = 0; t < *found; ++t) {
+    if (bestJ[t] == j) {
+      have = t;
+      break;
+    }
+  }
+  if (have >= 0) {
+    if (r2 < bestR2[have]) bestR2[have] = r2;
     return;
   }
-  double fx = (xyz[i * 3 + 0] - ox) / lx;
-  double fy = (xyz[i * 3 + 1] - oy) / ly;
-  double fz = (xyz[i * 3 + 2] - oz) / lz;
+  if (*found < k) {
+    bestR2[*found] = r2;
+    bestJ[*found] = j;
+    ++(*found);
+    return;
+  }
+  int w = 0;
+  for (int t = 1; t < k; ++t) {
+    if (bestR2[t] > bestR2[w]) w = t;
+  }
+  if (r2 < bestR2[w]) {
+    bestR2[w] = r2;
+    bestJ[w] = j;
+  }
+}
+
+extern "C" __global__ void bin_atoms(const double* __restrict__ xyz,
+    const int* __restrict__ mask, int n, int nFrames, double lx, double ly,
+    double lz, double ox, double oy, double oz, int nx, int ny, int nz,
+    int nC, int* __restrict__ cellOf, int* __restrict__ cellCount,
+    double* __restrict__ folded) {
+  const int tid = blockIdx.x * blockDim.x + threadIdx.x;
+  if (tid >= n * nFrames) return;
+  const int f = tid / n;
+  const int i = tid % n;
+  const int id = f * n + i;
+  if (mask && mask[id] == 0) {
+    cellOf[id] = -1;
+    folded[id * 3 + 0] = 0;
+    folded[id * 3 + 1] = 0;
+    folded[id * 3 + 2] = 0;
+    return;
+  }
+  double fx = (xyz[id * 3 + 0] - ox) / lx;
+  double fy = (xyz[id * 3 + 1] - oy) / ly;
+  double fz = (xyz[id * 3 + 2] - oz) / lz;
   fx -= floor(fx); fy -= floor(fy); fz -= floor(fz);
-  folded[i * 3 + 0] = fx * lx + ox;
-  folded[i * 3 + 1] = fy * ly + oy;
-  folded[i * 3 + 2] = fz * lz + oz;
+  folded[id * 3 + 0] = fx * lx + ox;
+  folded[id * 3 + 1] = fy * ly + oy;
+  folded[id * 3 + 2] = fz * lz + oz;
   int cx = (int)(fx * nx); if (cx < 0) cx = 0; if (cx >= nx) cx = nx - 1;
   int cy = (int)(fy * ny); if (cy < 0) cy = 0; if (cy >= ny) cy = ny - 1;
   int cz = (int)(fz * nz); if (cz < 0) cz = 0; if (cz >= nz) cz = nz - 1;
   const int cid = (cz * ny + cy) * nx + cx;
-  cellOf[i] = cid;
-  atomicAdd(cellCount + cid, 1);
+  cellOf[id] = cid;
+  atomicAdd(cellCount + f * nC + cid, 1);
 }
 
 extern "C" __global__ void prefix_cells(int* __restrict__ cellCount,
-    int* __restrict__ cellOff, int nC) {
+    int* __restrict__ cellOff, int nC, int nFrames) {
   extern __shared__ int shared[];
+  const int f = blockIdx.x;
+  if (f >= nFrames) return;
   const int tid = threadIdx.x;
   const int nthreads = blockDim.x;
   const int chunk = (nC + nthreads - 1) / nthreads;
   const int start = tid * chunk;
   const int end = start + chunk < nC ? start + chunk : nC;
+  int* counts = cellCount + f * nC;
+  int* offs = cellOff + f * (nC + 1);
   int local = 0;
   for (int c = start; c < end; ++c) {
-    cellOff[c] = local;
-    local += cellCount[c];
-    cellCount[c] = 0;
+    offs[c] = local;
+    local += counts[c];
+    counts[c] = 0;
   }
   shared[tid] = local;
   __syncthreads();
@@ -86,45 +123,79 @@ extern "C" __global__ void prefix_cells(int* __restrict__ cellCount,
       shared[t] = acc;
       acc += v;
     }
-    cellOff[nC] = acc;
+    offs[nC] = acc;
   }
   __syncthreads();
   const int off = shared[tid];
-  for (int c = start; c < end; ++c) cellOff[c] += off;
+  for (int c = start; c < end; ++c) offs[c] += off;
 }
 
-extern "C" __global__ void scatter_atoms(const int* __restrict__ cellOf,
-    int* __restrict__ cellCount, const int* __restrict__ cellOff,
-    int* __restrict__ order, int n) {
-  const int i = blockIdx.x * blockDim.x + threadIdx.x;
-  if (i >= n) return;
-  const int cid = cellOf[i];
+// HOOMD / vesin: store coordinates in cell order for coalesced stencil reads.
+extern "C" __global__ void scatter_atoms(const double* __restrict__ folded,
+    const int* __restrict__ cellOf, int* __restrict__ cellCount,
+    const int* __restrict__ cellOff, int* __restrict__ order,
+    double* __restrict__ sorted, int n, int nFrames, int nC) {
+  const int tid = blockIdx.x * blockDim.x + threadIdx.x;
+  if (tid >= n * nFrames) return;
+  const int f = tid / n;
+  const int i = tid % n;
+  const int id = f * n + i;
+  const int cid = cellOf[id];
   if (cid < 0) return;
-  const int slot = atomicAdd(cellCount + cid, 1);
-  order[cellOff[cid] + slot] = i;
+  const int slot = atomicAdd(cellCount + f * nC + cid, 1);
+  const int dest = f * n + cellOff[f * (nC + 1) + cid] + slot;
+  order[dest] = i;
+  sorted[dest * 3 + 0] = folded[id * 3 + 0];
+  sorted[dest * 3 + 1] = folded[id * 3 + 1];
+  sorted[dest * 3 + 2] = folded[id * 3 + 2];
 }
 
-extern "C" __global__ void knearest_shells(const double* __restrict__ folded,
+// HOOMD NeighborListGPUBinned: TPP threads split the cell occupants.
+// Cabana VerletLayout2D: packed n*k output. Host stop: worst <= (reach*cell_min)^2.
+extern "C" __global__ void knearest_shells(const double* __restrict__ sorted,
     const int* __restrict__ cellOf, const int* __restrict__ cellOff,
-    const int* __restrict__ order, int n, int nx, int ny, int nz,
-    double lx, double ly, double lz, double cellMin, int k, int maxReach,
-    int* __restrict__ out) {
-  const int i = blockIdx.x * blockDim.x + threadIdx.x;
-  if (i >= n) return;
-  for (int t = 0; t < k; ++t) out[i * k + t] = -1;
-  const int cid = cellOf[i];
-  if (cid < 0) return;
+    const int* __restrict__ order, int n, int nFrames, int nC,
+    int nx, int ny, int nz, double lx, double ly, double lz, double cellMin,
+    int k, int maxReach, int* __restrict__ out) {
+  const int lane = threadIdx.x % TPP;
+  const int gid = (blockIdx.x * blockDim.x + threadIdx.x) / TPP;
+  const int active = gid < n * nFrames;
+  const int f = active ? gid / n : 0;
+  const int i = active ? gid % n : 0;
+  const int id = f * n + i;
+  const int cid = active ? cellOf[id] : -1;
+  if (active && lane == 0) {
+    for (int t = 0; t < k; ++t) out[id * k + t] = -1;
+  }
   const int nxy = nx * ny;
-  const int iz = cid / nxy;
-  const int iy = (cid % nxy) / nx;
-  const int ix = cid % nx;
-  const double ixp = folded[i * 3 + 0];
-  const double iyp = folded[i * 3 + 1];
-  const double izp = folded[i * 3 + 2];
+  const int iz = cid >= 0 ? cid / nxy : 0;
+  const int iy = cid >= 0 ? (cid % nxy) / nx : 0;
+  const int ix = cid >= 0 ? cid % nx : 0;
+  double ixp = 0, iyp = 0, izp = 0;
+  if (cid >= 0) {
+    const int dest0 = f * n + cellOff[f * (nC + 1) + cid];
+    const int dest1 = f * n + cellOff[f * (nC + 1) + cid + 1];
+    for (int s = dest0; s < dest1; ++s) {
+      if (order[s] == i) {
+        ixp = sorted[s * 3 + 0];
+        iyp = sorted[s * 3 + 1];
+        izp = sorted[s * 3 + 2];
+        break;
+      }
+    }
+  }
   double bestR2[16];
   int bestJ[16];
   int found = 0;
+  extern __shared__ unsigned char raw[];
+  const int ppb = blockDim.x / TPP;
+  const int pslot = threadIdx.x / TPP;
+  double* sh_d2 = (double*)raw;
+  int* sh_j = (int*)(sh_d2 + ppb * TPP * 16);
+  int* sh_n = (int*)(sh_j + ppb * TPP * 16);
+  int* sh_stop = sh_n + ppb * TPP;
   for (int reach = 1; reach <= maxReach; ++reach) {
+    if (cid >= 0)
     for (int dx = -reach; dx <= reach; ++dx) {
       for (int dy = -reach; dy <= reach; ++dy) {
         for (int dz = -reach; dz <= reach; ++dz) {
@@ -142,68 +213,76 @@ extern "C" __global__ void knearest_shells(const double* __restrict__ folded,
           const double sy = (double)divEuclid(jy, ny) * ly;
           const double sz = (double)divEuclid(jz, nz) * lz;
           const int ncid = (ncz * ny + ncy) * nx + ncx;
-          const int a0 = cellOff[ncid];
-          const int a1 = cellOff[ncid + 1];
-          for (int s = a0; s < a1; ++s) {
+          const int a0 = f * n + cellOff[f * (nC + 1) + ncid];
+          const int a1 = f * n + cellOff[f * (nC + 1) + ncid + 1];
+          for (int s = a0 + lane; s < a1; s += TPP) {
             const int j = order[s];
             if (j == i) continue;
-            const double rx = folded[j * 3 + 0] - ixp + sx;
-            const double ry = folded[j * 3 + 1] - iyp + sy;
-            const double rz = folded[j * 3 + 2] - izp + sz;
+            const double rx = sorted[s * 3 + 0] - ixp + sx;
+            const double ry = sorted[s * 3 + 1] - iyp + sy;
+            const double rz = sorted[s * 3 + 2] - izp + sz;
             const double r2 = rx * rx + ry * ry + rz * rz;
             if (r2 <= 0.0) continue;
-            int have = -1;
-            for (int t = 0; t < found; ++t) {
-              if (bestJ[t] == j) {
-                have = t;
-                break;
-              }
-            }
-            if (have >= 0) {
-              if (r2 < bestR2[have]) bestR2[have] = r2;
-              continue;
-            }
-            if (found < k) {
-              bestR2[found] = r2;
-              bestJ[found] = j;
-              ++found;
-            } else {
-              int w = 0;
-              for (int t = 1; t < k; ++t) {
-                if (bestR2[t] > bestR2[w]) w = t;
-              }
-              if (r2 < bestR2[w]) {
-                bestR2[w] = r2;
-                bestJ[w] = j;
-              }
-            }
+            heapPush(bestR2, bestJ, &found, k, r2, j);
           }
         }
       }
     }
-    if (found >= k) {
-      double worst = bestR2[0];
-      for (int t = 1; t < found; ++t) {
-        if (bestR2[t] > worst) worst = bestR2[t];
-      }
-      const double bound = (double)reach * cellMin;
-      if (worst <= bound * bound) break;
+    const int base = (pslot * TPP + lane) * 16;
+    sh_n[pslot * TPP + lane] = found;
+    for (int t = 0; t < 16; ++t) {
+      sh_d2[base + t] = t < found ? bestR2[t] : 0;
+      sh_j[base + t] = t < found ? bestJ[t] : -1;
     }
+    __syncwarp();
+    if (lane == 0) {
+      found = 0;
+      for (int L = 0; L < TPP; ++L) {
+        const int nL = sh_n[pslot * TPP + L];
+        const int bL = (pslot * TPP + L) * 16;
+        for (int t = 0; t < nL; ++t) {
+          heapPush(bestR2, bestJ, &found, k, sh_d2[bL + t], sh_j[bL + t]);
+        }
+      }
+      int stop = 0;
+      if (found >= k) {
+        double worst = bestR2[0];
+        for (int t = 1; t < found; ++t) {
+          if (bestR2[t] > worst) worst = bestR2[t];
+        }
+        const double bound = (double)reach * cellMin;
+        if (worst <= bound * bound) stop = 1;
+      }
+      sh_n[pslot * TPP] = found;
+      sh_stop[pslot] = stop;
+      for (int t = 0; t < found; ++t) {
+        sh_d2[pslot * TPP * 16 + t] = bestR2[t];
+        sh_j[pslot * TPP * 16 + t] = bestJ[t];
+      }
+    }
+    __syncwarp();
+    found = sh_n[pslot * TPP];
+    for (int t = 0; t < found; ++t) {
+      bestR2[t] = sh_d2[pslot * TPP * 16 + t];
+      bestJ[t] = sh_j[pslot * TPP * 16 + t];
+    }
+    if (sh_stop[pslot]) break;
   }
+  if (lane != 0) return;
   for (int a = 1; a < found; ++a) {
     const double key = bestR2[a];
-    const int id = bestJ[a];
+    const int idj = bestJ[a];
     int p = a;
     while (p > 0 && (bestR2[p - 1] > key ||
-                     (bestR2[p - 1] == key && bestJ[p - 1] > id))) {
+                     (bestR2[p - 1] == key && bestJ[p - 1] > idj))) {
       bestR2[p] = bestR2[p - 1];
       bestJ[p] = bestJ[p - 1];
       --p;
     }
     bestR2[p] = key;
-    bestJ[p] = id;
+    bestJ[p] = idj;
   }
-  for (int t = 0; t < found; ++t) out[i * k + t] = bestJ[t];
+  for (int t = 0; t < found; ++t) out[id * k + t] = bestJ[t];
 }
 )CUDA";
 
@@ -251,21 +330,23 @@ bool available() {
 struct Workspace::Impl {
   int capN = 0;
   int capC = 0;
-  DevPtr dcellOf, dcellCount, dcellOff, dorder, dfolded;
+  DevPtr dcellOf, dcellCount, dcellOff, dorder, dfolded, dsorted;
 
-  void ensure(int n, int nC) {
-    if (n > capN) {
-      capN = n;
+  void ensure(int nTot, int nCtot, int nOff) {
+    if (nTot > capN) {
+      capN = nTot;
       growOne(dcellOf, static_cast<std::size_t>(capN) * sizeof(int), "cellOf");
       growOne(dorder, static_cast<std::size_t>(capN) * sizeof(int), "order");
       growOne(dfolded, static_cast<std::size_t>(capN) * 3 * sizeof(double),
               "folded");
+      growOne(dsorted, static_cast<std::size_t>(capN) * 3 * sizeof(double),
+              "sorted");
     }
-    if (nC > capC) {
-      capC = nC;
+    if (nCtot > capC) {
+      capC = nCtot;
       growOne(dcellCount, static_cast<std::size_t>(capC) * sizeof(int),
               "cellCount");
-      growOne(dcellOff, static_cast<std::size_t>(capC + 1) * sizeof(int),
+      growOne(dcellOff, static_cast<std::size_t>(nOff) * sizeof(int),
               "cellOff");
     }
   }
@@ -288,10 +369,17 @@ Workspace &Workspace::operator=(Workspace &&o) noexcept {
 void Workspace::knearest_into(const double *xyz, std::size_t n, const Cell &cell,
                               std::size_t k, int *out, std::size_t out_len,
                               const int *mask, double cell_hint) {
+  knearest_into_many(xyz, n, 1, cell, k, out, out_len, mask, cell_hint);
+}
+
+void Workspace::knearest_into_many(const double *xyz, std::size_t n,
+                                   std::size_t nFrames, const Cell &cell,
+                                   std::size_t k, int *out, std::size_t out_len,
+                                   const int *mask, double cell_hint) {
   if (!available()) {
     throw Error("CUDA driver or nvrtc not loaded");
   }
-  if (n == 0) {
+  if (n == 0 || nFrames == 0) {
     throw Error("no points");
   }
   if (k == 0) {
@@ -300,8 +388,8 @@ void Workspace::knearest_into(const double *xyz, std::size_t n, const Cell &cell
   if (k > static_cast<std::size_t>(kMaxK)) {
     throw Error("device k-nearest supports k <= 16");
   }
-  if (out_len != n * k) {
-    throw Error("out buffer length must be n * k");
+  if (out_len != n * k * nFrames) {
+    throw Error("out buffer length must be nFrames * n * k");
   }
   if (xyz == nullptr || out == nullptr) {
     throw Error("null pointer");
@@ -339,12 +427,16 @@ void Workspace::knearest_into(const double *xyz, std::size_t n, const Cell &cell
                std::min(ly / static_cast<double>(ny), lz / static_cast<double>(nz)));
   const int maxReach = std::max(nx, std::max(ny, nz)) / 2 + 1;
   const int nI = static_cast<int>(n);
+  const int nF = static_cast<int>(nFrames);
   const int kI = static_cast<int>(k);
+  const int nTot = nI * nF;
+  const int nCtot = nC * nF;
+  const int nOff = (nC + 1) * nF;
 
-  impl_->ensure(nI, nC);
+  impl_->ensure(nTot, nCtot, nOff);
   auto &rt = CUDART::instance();
   checkCuda(rt.cudaMemset(impl_->dcellCount.p, 0,
-                          static_cast<std::size_t>(nC) * sizeof(int)),
+                          static_cast<std::size_t>(nCtot) * sizeof(int)),
             "zero cells");
 
   auto &factory = KernelFactory::instance(0);
@@ -355,7 +447,13 @@ void Workspace::knearest_into(const double *xyz, std::size_t n, const Cell &cell
   auto *kNear = factory.create("knearest_shells", kKernels, "linkcell.cu", opt);
 
   const int block = 128;
-  const int grid = (nI + block - 1) / block;
+  const int grid = (nTot + block - 1) / block;
+  const int tppGrid = (nTot * 8 + block - 1) / block;
+  const int ppb = block / 8;
+  const std::size_t sh = static_cast<std::size_t>(ppb) * 8 * 16 * sizeof(double) +
+                         static_cast<std::size_t>(ppb) * 8 * 16 * sizeof(int) +
+                         static_cast<std::size_t>(ppb) * 8 * sizeof(int) +
+                         static_cast<std::size_t>(ppb) * sizeof(int);
   void *xyzP = const_cast<double *>(xyz);
   void *maskV = const_cast<int *>(mask);
   void *outP = out;
@@ -366,26 +464,32 @@ void Workspace::knearest_into(const double *xyz, std::size_t n, const Cell &cell
   double oy = cell.origin[1];
   double oz = cell.origin[2];
   {
-    std::vector<void *> a = {&xyzP, &maskV, &nI, &lx, &ly, &lz, &ox, &oy, &oz,
-                             &nx,   &ny,    &nz, &impl_->dcellOf.p,
+    std::vector<void *> a = {&xyzP, &maskV, &nI, &nF, &lx, &ly, &lz, &ox, &oy,
+                             &oz,   &nx,    &ny, &nz, &nCv, &impl_->dcellOf.p,
                              &impl_->dcellCount.p, &impl_->dfolded.p};
     kBin->launch(dim3(grid), dim3(block), 0, nullptr, a, true);
   }
   {
-    std::vector<void *> a = {&impl_->dcellCount.p, &impl_->dcellOff.p, &nCv};
-    kPref->launch(dim3(1), dim3(128), 128 * sizeof(int), nullptr, a, true);
-  }
-  {
-    std::vector<void *> a = {&impl_->dcellOf.p, &impl_->dcellCount.p,
-                             &impl_->dcellOff.p, &impl_->dorder.p, &nI};
-    kScat->launch(dim3(grid), dim3(block), 0, nullptr, a, true);
+    std::vector<void *> a = {&impl_->dcellCount.p, &impl_->dcellOff.p, &nCv,
+                             &nF};
+    kPref->launch(dim3(nF), dim3(128), 128 * sizeof(int), nullptr, a, true);
   }
   {
     std::vector<void *> a = {&impl_->dfolded.p, &impl_->dcellOf.p,
-                             &impl_->dcellOff.p, &impl_->dorder.p,
-                             &nI, &nx, &ny, &nz, &lx, &ly, &lz, &cmin, &kI,
-                             &maxR, &outP};
-    kNear->launch(dim3(grid), dim3(block), 0, nullptr, a, true);
+                             &impl_->dcellCount.p, &impl_->dcellOff.p,
+                             &impl_->dorder.p, &impl_->dsorted.p, &nI, &nF,
+                             &nCv};
+    kScat->launch(dim3(grid), dim3(block), 0, nullptr, a, true);
+  }
+  {
+    std::vector<void *> a = {
+        &impl_->dsorted.p, &impl_->dcellOf.p, &impl_->dcellOff.p,
+        &impl_->dorder.p,  &nI,               &nF,
+        &nCv,              &nx,               &ny,
+        &nz,               &lx,               &ly,
+        &lz,               &cmin,             &kI,
+        &maxR,             &outP};
+    kNear->launch(dim3(tppGrid), dim3(block), sh, nullptr, a, true);
   }
 }
 

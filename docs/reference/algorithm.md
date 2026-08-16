@@ -74,9 +74,13 @@ rayon. Each source owns its heap.
 
 ## Device
 
-`linkcell::gpu::Workspace` is the same walk on a CUDA device: host
-bin counts, fold into the primary cell, exclusive scan, then one
-source per thread over Chebyshev shells with the same stop
-(`worst <= (reach * cell_min)^2`). The workspace keeps the bin
-arrays. Orthorhombic cells only; `k <= 16`. Pair lists stay on the
-device. vesin CUDA is the cutoff-pair counterpart; this is k-nearest.
+`linkcell::gpu::Workspace` is the same walk on a CUDA device. The
+layout follows HOOMD `NeighborListGPUBinned` and vesin CUDA: fold,
+bin, exclusive scan, then **cell-major coordinates** so the stencil
+reads coalesce. Eight threads share each source (HOOMD
+`threads_per_particle`) and stride the occupants of a cell; after
+each Chebyshev shell they merge heaps and apply the host stop
+(`worst <= (reach * cell_min)^2`). Output is Cabana's 2-D packed
+`n * k` list. `knearest_into_many` launches one grid over every
+frame that shares a cell. Orthorhombic cells only; `k <= 16`. vesin
+CUDA is the cutoff-pair counterpart.
