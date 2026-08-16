@@ -128,6 +128,12 @@ const linkcell::Neighbours nn = linkcell::knearest(xyz, 2, box, 1);
 `nn.neighbour(i, j)` is the j-th neighbour of i. Failure throws
 `linkcell::Error`.
 
+The optional device walk reads occupancy from the environment:
+`LINKCELL_TPP` (threads per particle) and `LINKCELL_BLOCK` (CUDA
+block size). Unset, the library picks a pair that maximises particles
+per block under the device thread and 48 KiB shared-memory limits.
+d-SEAMS writes the same keys from `SEAMS_CONFIG` / `seams --tpp`.
+
 ## Docs
 
 | Quadrant | Page |
