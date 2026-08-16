@@ -10,7 +10,8 @@ vesin builds cutoff pair lists. nanoflann builds Euclidean KD-trees without a
 minimum-image convention. This crate is the piece those two leave open: the
 linked-cell walk of Allen and Tildesley (*Computer Simulation of Liquids*),
 a k-heap per source, shells expanded until the k-th neighbour cannot sit
-outside the visited cube.
+outside the visited cube. The optional gpulite path runs that walk on a
+CUDA device (`linkcell::gpu::Workspace`); pair lists stay on the device.
 
 It is a LODE library. The Rust crate is the implementation. The C ABI
 (`lc_*`) is the hourglass waist, the same shape as
@@ -42,7 +43,7 @@ As a wrap, Meson exposes `linkcell_dep`:
 ```
 [wrap-git]
 url = https://github.com/d-SEAMS/linkcell.git
-revision = v0.2.4
+revision = v0.3.0
 depth = 1
 
 [provide]
@@ -126,6 +127,12 @@ const linkcell::Neighbours nn = linkcell::knearest(xyz, 2, box, 1);
 `nn` owns the packed `n * k` buffer. Unused slots are `-1`.
 `nn.neighbour(i, j)` is the j-th neighbour of i. Failure throws
 `linkcell::Error`.
+
+The optional device walk reads occupancy from the environment:
+`LINKCELL_TPP` (threads per particle) and `LINKCELL_BLOCK` (CUDA
+block size). Unset, the library picks a pair that maximises particles
+per block under the device thread and 48 KiB shared-memory limits.
+d-SEAMS writes the same keys from `SEAMS_CONFIG` / `seams --tpp`.
 
 ## Docs
 

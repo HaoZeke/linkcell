@@ -4,3 +4,5 @@ option('with_tests', type: 'boolean', value: true,
   description: 'Run cargo test from meson test')
 option('with_examples', type: 'boolean', value: true,
   description: 'Build C and C++ example programs')
+option('with_gpulite', type: 'feature', value: 'auto',
+  description: 'Device k-nearest via gpulite (NVRTC, no CUDA SDK)')

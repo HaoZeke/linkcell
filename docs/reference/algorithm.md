@@ -71,3 +71,15 @@ general: fractional wrap). It is not the production walk.
 
 The `parallel` Cargo feature (on by default) maps sources with
 rayon. Each source owns its heap.
+
+## Device
+
+`linkcell::gpu::Workspace` is the same walk on a CUDA device. Fold,
+bin, then a tiled Hillis-Steele exclusive scan (CUB DeviceScan /
+HOOMD cell offsets). Occupants are stored in cell-major order with
+an O(1) home slot. The stencil is a precomputed Chebyshev shell
+table (LAMMPS `NStencil`, HOOMD `d_cell_adj`), not a nested 3-D
+loop. Eight threads share each source and stride occupants; after
+each shell they merge heaps and apply the host stop. Output is
+Cabana's 2-D packed `n * k` list. `knearest_into_many` covers every
+frame that shares a cell. Orthorhombic cells only; `k <= 16`.
