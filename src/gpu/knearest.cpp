@@ -201,10 +201,11 @@ extern "C" __global__ void knearest_shells(const double* __restrict__ sorted,
   int* sh_j = (int*)(sh_d2 + ppb * tpp * K);
   int* sh_n = (int*)(sh_j + ppb * tpp * K);
   int* sh_stop = sh_n + ppb * tpp;
+  int live = 1;
   for (int reach = 1; reach <= maxReach; ++reach) {
     const int s0 = reachOff[reach];
     const int s1 = reachOff[reach + 1];
-    if (cid >= 0) {
+    if (live && cid >= 0) {
       for (int st = s0; st < s1; ++st) {
         const int dx = sdx[st];
         const int dy = sdy[st];
@@ -271,7 +272,7 @@ extern "C" __global__ void knearest_shells(const double* __restrict__ sorted,
       bestR2[t] = sh_d2[pslot * tpp * K + t];
       bestJ[t] = sh_j[pslot * tpp * K + t];
     }
-    if (sh_stop[pslot]) break;
+    if (sh_stop[pslot]) live = 0;
   }
   if (lane != 0) return;
   for (int a = 1; a < found; ++a) {
