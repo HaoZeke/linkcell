@@ -46,7 +46,7 @@ public:
                           std::size_t nFrames, const Cell &cell, std::size_t k,
                           int *out, std::size_t out_len,
                           const int *mask = nullptr, double cell_hint = 0.0,
-                          bool wait = true);
+                          bool wait = true, const double *frameBox = nullptr);
 
   /// Persistent CUDA stream for this workspace. All device work is
   /// enqueued here; call `wait()` before reading device results.

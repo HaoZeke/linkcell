@@ -65,8 +65,9 @@ __device__ inline void heapPush(double* bestR2, int* bestJ, int* found, int k,
 }
 
 extern "C" __global__ void bin_atoms(const double* __restrict__ xyz,
-    const int* __restrict__ mask, int n, int nFrames, double lx, double ly,
-    double lz, double ox, double oy, double oz, int nx, int ny, int nz,
+    const int* __restrict__ mask, int n, int nFrames, const double* __restrict__ lx,
+    const double* __restrict__ ly, const double* __restrict__ lz,
+    double ox, double oy, double oz, int nx, int ny, int nz,
     int nC, int* __restrict__ cellOf, int* __restrict__ cellCount,
     double* __restrict__ folded) {
   const int tid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -81,13 +82,14 @@ extern "C" __global__ void bin_atoms(const double* __restrict__ xyz,
     folded[id * 3 + 2] = 0;
     return;
   }
-  double fx = (xyz[id * 3 + 0] - ox) / lx;
-  double fy = (xyz[id * 3 + 1] - oy) / ly;
-  double fz = (xyz[id * 3 + 2] - oz) / lz;
+  const double lxf = lx[f], lyf = ly[f], lzf = lz[f];
+  double fx = (xyz[id * 3 + 0] - ox) / lxf;
+  double fy = (xyz[id * 3 + 1] - oy) / lyf;
+  double fz = (xyz[id * 3 + 2] - oz) / lzf;
   fx -= floor(fx); fy -= floor(fy); fz -= floor(fz);
-  folded[id * 3 + 0] = fx * lx + ox;
-  folded[id * 3 + 1] = fy * ly + oy;
-  folded[id * 3 + 2] = fz * lz + oz;
+  folded[id * 3 + 0] = fx * lxf + ox;
+  folded[id * 3 + 1] = fy * lyf + oy;
+  folded[id * 3 + 2] = fz * lzf + oz;
   int cx = (int)(fx * nx); if (cx < 0) cx = 0; if (cx >= nx) cx = nx - 1;
   int cy = (int)(fy * ny); if (cy < 0) cy = 0; if (cy >= ny) cy = ny - 1;
   int cz = (int)(fz * nz); if (cz < 0) cz = 0; if (cz >= nz) cz = nz - 1;
@@ -168,8 +170,9 @@ extern "C" __global__ void knearest_shells(const double* __restrict__ sorted,
     const int* __restrict__ sdx, const int* __restrict__ sdy,
     const int* __restrict__ sdz, const int* __restrict__ reachOff,
     int n, int nFrames, int nC, int nx, int ny, int nz,
-    double lx, double ly, double lz, double cellMin, int k, int maxReach,
-    int tpp, int* __restrict__ out) {
+    const double* __restrict__ lx, const double* __restrict__ ly,
+    const double* __restrict__ lz, const double* __restrict__ cellMin,
+    int k, int maxReach, int tpp, int* __restrict__ out) {
   const int lane = threadIdx.x % tpp;
   const int gid = (blockIdx.x * blockDim.x + threadIdx.x) / tpp;
   const int active = gid < n * nFrames;
@@ -217,9 +220,9 @@ extern "C" __global__ void knearest_shells(const double* __restrict__ sorted,
         const int ncx = remEuclid(jx, nx);
         const int ncy = remEuclid(jy, ny);
         const int ncz = remEuclid(jz, nz);
-        const double sx = (double)divEuclid(jx, nx) * lx;
-        const double sy = (double)divEuclid(jy, ny) * ly;
-        const double sz = (double)divEuclid(jz, nz) * lz;
+        const double sx = (double)divEuclid(jx, nx) * lx[f];
+        const double sy = (double)divEuclid(jy, ny) * ly[f];
+        const double sz = (double)divEuclid(jz, nz) * lz[f];
         const int ncid = (ncz * ny + ncy) * nx + ncx;
         const int a0 = f * n + cellOff[f * (nC + 1) + ncid];
         const int a1 = f * n + cellOff[f * (nC + 1) + ncid + 1];
@@ -257,7 +260,7 @@ extern "C" __global__ void knearest_shells(const double* __restrict__ sorted,
         for (int t = 1; t < found; ++t) {
           if (bestR2[t] > worst) worst = bestR2[t];
         }
-        const double bound = (double)reach * cellMin;
+        const double bound = (double)reach * cellMin[f];
         if (worst <= bound * bound) stop = 1;
       }
       sh_n[pslot * tpp] = found;
@@ -367,6 +370,7 @@ struct Workspace::Impl {
   cudaStream_t stream = nullptr;
   DevPtr dcellOf, dcellCount, dcellOff, dorder, dfolded, dsorted, dhome;
   DevPtr dsdx, dsdy, dsdz, dreachOff;
+  DevPtr dlx, dly, dlz, dcmin;
 
   void ensureStream() {
     if (stream == nullptr) {
@@ -469,7 +473,7 @@ void Workspace::knearest_into_many(const double *xyz, std::size_t n,
                                    std::size_t nFrames, const Cell &cell,
                                    std::size_t k, int *out, std::size_t out_len,
                                    const int *mask, double cell_hint,
-                                   bool wait) {
+                                   bool wait, const double *frameBox) {
   if (!available()) {
     throw Error("CUDA driver or nvrtc not loaded");
   }
@@ -531,6 +535,41 @@ void Workspace::knearest_into_many(const double *xyz, std::size_t n,
   impl_->ensureStencil(maxReach);
   impl_->ensureStream();
   auto &rt = CUDART::instance();
+  const std::size_t fSz = static_cast<std::size_t>(nF);
+  std::vector<double> hLx(fSz, lx), hLy(fSz, ly), hLz(fSz, lz), hCmin(fSz, cellMin);
+  if (frameBox != nullptr) {
+    for (int f = 0; f < nF; ++f) {
+      hLx[static_cast<std::size_t>(f)] = frameBox[static_cast<std::size_t>(f) * 3 + 0];
+      hLy[static_cast<std::size_t>(f)] = frameBox[static_cast<std::size_t>(f) * 3 + 1];
+      hLz[static_cast<std::size_t>(f)] = frameBox[static_cast<std::size_t>(f) * 3 + 2];
+      const int fnx = std::max(1, static_cast<int>(std::floor(hLx[static_cast<std::size_t>(f)] / edge)));
+      const int fny = std::max(1, static_cast<int>(std::floor(hLy[static_cast<std::size_t>(f)] / edge)));
+      const int fnz = std::max(1, static_cast<int>(std::floor(hLz[static_cast<std::size_t>(f)] / edge)));
+      if (fnx != nx || fny != ny || fnz != nz) {
+        throw Error("frame boxes need the same cell grid");
+      }
+      hCmin[static_cast<std::size_t>(f)] = std::min(
+          hLx[static_cast<std::size_t>(f)] / static_cast<double>(nx),
+          std::min(hLy[static_cast<std::size_t>(f)] / static_cast<double>(ny),
+                   hLz[static_cast<std::size_t>(f)] / static_cast<double>(nz)));
+    }
+  }
+  growOne(impl_->dlx, fSz * sizeof(double), "lx");
+  growOne(impl_->dly, fSz * sizeof(double), "ly");
+  growOne(impl_->dlz, fSz * sizeof(double), "lz");
+  growOne(impl_->dcmin, fSz * sizeof(double), "cmin");
+  checkCuda(rt.cudaMemcpy(impl_->dlx.p, hLx.data(), fSz * sizeof(double),
+                          cudaMemcpyHostToDevice),
+            "HtoD lx");
+  checkCuda(rt.cudaMemcpy(impl_->dly.p, hLy.data(), fSz * sizeof(double),
+                          cudaMemcpyHostToDevice),
+            "HtoD ly");
+  checkCuda(rt.cudaMemcpy(impl_->dlz.p, hLz.data(), fSz * sizeof(double),
+                          cudaMemcpyHostToDevice),
+            "HtoD lz");
+  checkCuda(rt.cudaMemcpy(impl_->dcmin.p, hCmin.data(), fSz * sizeof(double),
+                          cudaMemcpyHostToDevice),
+            "HtoD cmin");
   checkCuda(rt.cudaMemset(impl_->dcellCount.p, 0,
                           static_cast<std::size_t>(nCtot) * sizeof(int)),
             "zero cells");
@@ -618,9 +657,9 @@ void Workspace::knearest_into_many(const double *xyz, std::size_t n,
                    &maskV,
                    &nI,
                    &nF,
-                   &lx,
-                   &ly,
-                   &lz,
+                   &impl_->dlx.p,
+                   &impl_->dly.p,
+                   &impl_->dlz.p,
                    &ox,
                    &oy,
                    &oz,
@@ -654,8 +693,8 @@ void Workspace::knearest_into_many(const double *xyz, std::size_t n,
                    &impl_->dsdy.p,      &impl_->dsdz.p,    &impl_->dreachOff.p,
                    &nI,                 &nF,               &nCv,
                    &nx,                 &ny,               &nz,
-                   &lx,                 &ly,               &lz,
-                   &cmin,               &kI,               &maxR,
+                   &impl_->dlx.p,       &impl_->dly.p,     &impl_->dlz.p,
+                   &impl_->dcmin.p,     &kI,               &maxR,
                    &tpp,                &outP};
     auto a = launchArgs(raw, sizeof(raw) / sizeof(raw[0]));
     kNear->launch(dim3(tppGrid), dim3(block), sh, impl_->stream, a, false);
