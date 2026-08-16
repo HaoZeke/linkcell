@@ -110,7 +110,7 @@ if _install
     filebase: 'linkcell',
     description: 'Periodic linked-cell k-nearest neighbour search',
     version: meson.project_version(),
-    url: 'https://github.com/HaoZeke/linkcell',
+    url: 'https://github.com/d-SEAMS/linkcell',
     # Raw `-lfoo` does not get `-L${libdir}`; wrap consumers then fail
     # at link with "cannot find -llinkcell".
     libraries: ['-L${libdir}', '-llinkcell'],

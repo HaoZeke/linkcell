@@ -6,7 +6,7 @@ includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
 Name: linkcell
 Description: Periodic linked-cell k-nearest neighbour search
 Version: @PROJECT_VERSION@
-URL: https://github.com/HaoZeke/linkcell
+URL: https://github.com/d-SEAMS/linkcell
 Libs: -L${libdir} -llinkcell
 Libs.private: @LINKCELL_PKG_LIBS_PRIVATE@
 Cflags: -I${includedir}
