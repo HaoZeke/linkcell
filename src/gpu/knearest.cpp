@@ -467,9 +467,9 @@ void Workspace::knearest_into_many(const double *xyz, std::size_t n,
   if (!(edge > 0.0)) {
     edge = 3.0;
   }
-  const double lx = cell.a[0];
-  const double ly = cell.b[1];
-  const double lz = cell.c[2];
+  double lx = cell.a[0];
+  double ly = cell.b[1];
+  double lz = cell.c[2];
   edge = std::min(edge, std::min(lx, std::min(ly, lz)));
   int nx = static_cast<int>(std::floor(lx / edge));
   int ny = static_cast<int>(std::floor(ly / edge));
@@ -491,9 +491,9 @@ void Workspace::knearest_into_many(const double *xyz, std::size_t n,
       std::min(lx / static_cast<double>(nx),
                std::min(ly / static_cast<double>(ny), lz / static_cast<double>(nz)));
   const int maxReach = std::max(nx, std::max(ny, nz)) / 2 + 1;
-  const int nI = static_cast<int>(n);
-  const int nF = static_cast<int>(nFrames);
-  const int kI = static_cast<int>(k);
+  int nI = static_cast<int>(n);
+  int nF = static_cast<int>(nFrames);
+  int kI = static_cast<int>(k);
   const int nTot = nI * nF;
   const int nCtot = nC * nF;
   const int nOff = (nC + 1) * nF;
