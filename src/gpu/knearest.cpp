@@ -96,55 +96,65 @@ extern "C" __global__ void bin_atoms(const double* __restrict__ xyz,
   atomicAdd(cellCount + f * nC + cid, 1);
 }
 
+// Tiled Blelloch exclusive scan, one frame per block (HOOMD / CUB DeviceScan).
 extern "C" __global__ void prefix_cells(int* __restrict__ cellCount,
     int* __restrict__ cellOff, int nC, int nFrames) {
-  extern __shared__ int shared[];
+  extern __shared__ int sh[];
   const int f = blockIdx.x;
   if (f >= nFrames) return;
   const int tid = threadIdx.x;
   const int nthreads = blockDim.x;
-  const int chunk = (nC + nthreads - 1) / nthreads;
-  const int start = tid * chunk;
-  const int end = start + chunk < nC ? start + chunk : nC;
   int* counts = cellCount + f * nC;
   int* offs = cellOff + f * (nC + 1);
-  int local = 0;
-  for (int c = start; c < end; ++c) {
-    offs[c] = local;
-    local += counts[c];
-    counts[c] = 0;
-  }
-  shared[tid] = local;
-  __syncthreads();
-  if (tid == 0) {
-    int acc = 0;
-    for (int t = 0; t < nthreads; ++t) {
-      const int v = shared[t];
-      shared[t] = acc;
-      acc += v;
+  int carry = 0;
+  for (int base = 0; base < nC; base += nthreads) {
+    const int i = base + tid;
+    const int val = (i < nC) ? counts[i] : 0;
+    sh[tid] = val;
+    __syncthreads();
+    for (int d = 1; d < nthreads; d <<= 1) {
+      int add = 0;
+      if (tid >= d) add = sh[tid - d];
+      __syncthreads();
+      sh[tid] += add;
+      __syncthreads();
     }
-    offs[nC] = acc;
+    // sh[tid] is inclusive; exclusive is sh[tid] - val
+    if (i < nC) {
+      offs[i] = carry + sh[tid] - val;
+      counts[i] = 0;
+    }
+    __syncthreads();
+    if (tid == nthreads - 1) {
+      sh[0] = carry + sh[tid];
+    }
+    __syncthreads();
+    carry = sh[0];
+    __syncthreads();
   }
-  __syncthreads();
-  const int off = shared[tid];
-  for (int c = start; c < end; ++c) offs[c] += off;
+  if (tid == 0) offs[nC] = carry;
 }
 
 // HOOMD / vesin: store coordinates in cell order for coalesced stencil reads.
 extern "C" __global__ void scatter_atoms(const double* __restrict__ folded,
     const int* __restrict__ cellOf, int* __restrict__ cellCount,
     const int* __restrict__ cellOff, int* __restrict__ order,
-    double* __restrict__ sorted, int n, int nFrames, int nC) {
+    double* __restrict__ sorted, int* __restrict__ home, int n, int nFrames,
+    int nC) {
   const int tid = blockIdx.x * blockDim.x + threadIdx.x;
   if (tid >= n * nFrames) return;
   const int f = tid / n;
   const int i = tid % n;
   const int id = f * n + i;
   const int cid = cellOf[id];
-  if (cid < 0) return;
+  if (cid < 0) {
+    home[id] = -1;
+    return;
+  }
   const int slot = atomicAdd(cellCount + f * nC + cid, 1);
   const int dest = f * n + cellOff[f * (nC + 1) + cid] + slot;
   order[dest] = i;
+  home[id] = dest;
   sorted[dest * 3 + 0] = folded[id * 3 + 0];
   sorted[dest * 3 + 1] = folded[id * 3 + 1];
   sorted[dest * 3 + 2] = folded[id * 3 + 2];
@@ -154,9 +164,12 @@ extern "C" __global__ void scatter_atoms(const double* __restrict__ folded,
 // Cabana VerletLayout2D: packed n*k output. Host stop: worst <= (reach*cell_min)^2.
 extern "C" __global__ void knearest_shells(const double* __restrict__ sorted,
     const int* __restrict__ cellOf, const int* __restrict__ cellOff,
-    const int* __restrict__ order, int n, int nFrames, int nC,
-    int nx, int ny, int nz, double lx, double ly, double lz, double cellMin,
-    int k, int maxReach, int* __restrict__ out) {
+    const int* __restrict__ order, const int* __restrict__ home,
+    const int* __restrict__ sdx, const int* __restrict__ sdy,
+    const int* __restrict__ sdz, const int* __restrict__ reachOff,
+    int n, int nFrames, int nC, int nx, int ny, int nz,
+    double lx, double ly, double lz, double cellMin, int k, int maxReach,
+    int* __restrict__ out) {
   const int lane = threadIdx.x % TPP;
   const int gid = (blockIdx.x * blockDim.x + threadIdx.x) / TPP;
   const int active = gid < n * nFrames;
@@ -173,16 +186,10 @@ extern "C" __global__ void knearest_shells(const double* __restrict__ sorted,
   const int ix = cid >= 0 ? cid % nx : 0;
   double ixp = 0, iyp = 0, izp = 0;
   if (cid >= 0) {
-    const int dest0 = f * n + cellOff[f * (nC + 1) + cid];
-    const int dest1 = f * n + cellOff[f * (nC + 1) + cid + 1];
-    for (int s = dest0; s < dest1; ++s) {
-      if (order[s] == i) {
-        ixp = sorted[s * 3 + 0];
-        iyp = sorted[s * 3 + 1];
-        izp = sorted[s * 3 + 2];
-        break;
-      }
-    }
+    const int dest = home[id];
+    ixp = sorted[dest * 3 + 0];
+    iyp = sorted[dest * 3 + 1];
+    izp = sorted[dest * 3 + 2];
   }
   double bestR2[16];
   int bestJ[16];
@@ -195,36 +202,34 @@ extern "C" __global__ void knearest_shells(const double* __restrict__ sorted,
   int* sh_n = (int*)(sh_j + ppb * TPP * 16);
   int* sh_stop = sh_n + ppb * TPP;
   for (int reach = 1; reach <= maxReach; ++reach) {
-    if (cid >= 0)
-    for (int dx = -reach; dx <= reach; ++dx) {
-      for (int dy = -reach; dy <= reach; ++dy) {
-        for (int dz = -reach; dz <= reach; ++dz) {
-          if (reach > 1 && dx != -reach && dx != reach && dy != -reach &&
-              dy != reach && dz != -reach && dz != reach) {
-            continue;
-          }
-          const int jx = ix + dx;
-          const int jy = iy + dy;
-          const int jz = iz + dz;
-          const int ncx = remEuclid(jx, nx);
-          const int ncy = remEuclid(jy, ny);
-          const int ncz = remEuclid(jz, nz);
-          const double sx = (double)divEuclid(jx, nx) * lx;
-          const double sy = (double)divEuclid(jy, ny) * ly;
-          const double sz = (double)divEuclid(jz, nz) * lz;
-          const int ncid = (ncz * ny + ncy) * nx + ncx;
-          const int a0 = f * n + cellOff[f * (nC + 1) + ncid];
-          const int a1 = f * n + cellOff[f * (nC + 1) + ncid + 1];
-          for (int s = a0 + lane; s < a1; s += TPP) {
-            const int j = order[s];
-            if (j == i) continue;
-            const double rx = sorted[s * 3 + 0] - ixp + sx;
-            const double ry = sorted[s * 3 + 1] - iyp + sy;
-            const double rz = sorted[s * 3 + 2] - izp + sz;
-            const double r2 = rx * rx + ry * ry + rz * rz;
-            if (r2 <= 0.0) continue;
-            heapPush(bestR2, bestJ, &found, k, r2, j);
-          }
+    const int s0 = reachOff[reach];
+    const int s1 = reachOff[reach + 1];
+    if (cid >= 0) {
+      for (int st = s0; st < s1; ++st) {
+        const int dx = sdx[st];
+        const int dy = sdy[st];
+        const int dz = sdz[st];
+        const int jx = ix + dx;
+        const int jy = iy + dy;
+        const int jz = iz + dz;
+        const int ncx = remEuclid(jx, nx);
+        const int ncy = remEuclid(jy, ny);
+        const int ncz = remEuclid(jz, nz);
+        const double sx = (double)divEuclid(jx, nx) * lx;
+        const double sy = (double)divEuclid(jy, ny) * ly;
+        const double sz = (double)divEuclid(jz, nz) * lz;
+        const int ncid = (ncz * ny + ncy) * nx + ncx;
+        const int a0 = f * n + cellOff[f * (nC + 1) + ncid];
+        const int a1 = f * n + cellOff[f * (nC + 1) + ncid + 1];
+        for (int s = a0 + lane; s < a1; s += TPP) {
+          const int j = order[s];
+          if (j == i) continue;
+          const double rx = sorted[s * 3 + 0] - ixp + sx;
+          const double ry = sorted[s * 3 + 1] - iyp + sy;
+          const double rz = sorted[s * 3 + 2] - izp + sz;
+          const double r2 = rx * rx + ry * ry + rz * rz;
+          if (r2 <= 0.0) continue;
+          heapPush(bestR2, bestJ, &found, k, r2, j);
         }
       }
     }
@@ -327,16 +332,45 @@ bool available() {
   return CUDART::loaded() && NVRTC::loaded();
 }
 
+void buildStencil(int maxReach, std::vector<int> &dx, std::vector<int> &dy,
+                  std::vector<int> &dz, std::vector<int> &reachOff) {
+  dx.clear();
+  dy.clear();
+  dz.clear();
+  reachOff.assign(static_cast<std::size_t>(maxReach) + 2, 0);
+  for (int r = 1; r <= maxReach; ++r) {
+    reachOff[static_cast<std::size_t>(r)] = static_cast<int>(dx.size());
+    for (int ix = -r; ix <= r; ++ix) {
+      for (int iy = -r; iy <= r; ++iy) {
+        for (int iz = -r; iz <= r; ++iz) {
+          if (r > 1 && std::abs(ix) != r && std::abs(iy) != r &&
+              std::abs(iz) != r) {
+            continue;
+          }
+          dx.push_back(ix);
+          dy.push_back(iy);
+          dz.push_back(iz);
+        }
+      }
+    }
+  }
+  reachOff[static_cast<std::size_t>(maxReach) + 1] = static_cast<int>(dx.size());
+}
+
 struct Workspace::Impl {
   int capN = 0;
   int capC = 0;
-  DevPtr dcellOf, dcellCount, dcellOff, dorder, dfolded, dsorted;
+  int capSt = 0;
+  int cachedReach = -1;
+  DevPtr dcellOf, dcellCount, dcellOff, dorder, dfolded, dsorted, dhome;
+  DevPtr dsdx, dsdy, dsdz, dreachOff;
 
   void ensure(int nTot, int nCtot, int nOff) {
     if (nTot > capN) {
       capN = nTot;
       growOne(dcellOf, static_cast<std::size_t>(capN) * sizeof(int), "cellOf");
       growOne(dorder, static_cast<std::size_t>(capN) * sizeof(int), "order");
+      growOne(dhome, static_cast<std::size_t>(capN) * sizeof(int), "home");
       growOne(dfolded, static_cast<std::size_t>(capN) * 3 * sizeof(double),
               "folded");
       growOne(dsorted, static_cast<std::size_t>(capN) * 3 * sizeof(double),
@@ -349,6 +383,36 @@ struct Workspace::Impl {
       growOne(dcellOff, static_cast<std::size_t>(nOff) * sizeof(int),
               "cellOff");
     }
+  }
+
+  void ensureStencil(int maxReach) {
+    if (cachedReach == maxReach && dsdx.p != nullptr) {
+      return;
+    }
+    std::vector<int> dx, dy, dz, off;
+    buildStencil(maxReach, dx, dy, dz, off);
+    const int nSt = static_cast<int>(dx.size());
+    if (nSt > capSt) {
+      capSt = nSt;
+      growOne(dsdx, static_cast<std::size_t>(capSt) * sizeof(int), "sdx");
+      growOne(dsdy, static_cast<std::size_t>(capSt) * sizeof(int), "sdy");
+      growOne(dsdz, static_cast<std::size_t>(capSt) * sizeof(int), "sdz");
+    }
+    growOne(dreachOff, off.size() * sizeof(int), "reachOff");
+    auto &rt = CUDART::instance();
+    checkCuda(rt.cudaMemcpy(dsdx.p, dx.data(), dx.size() * sizeof(int),
+                            cudaMemcpyHostToDevice),
+              "HtoD sdx");
+    checkCuda(rt.cudaMemcpy(dsdy.p, dy.data(), dy.size() * sizeof(int),
+                            cudaMemcpyHostToDevice),
+              "HtoD sdy");
+    checkCuda(rt.cudaMemcpy(dsdz.p, dz.data(), dz.size() * sizeof(int),
+                            cudaMemcpyHostToDevice),
+              "HtoD sdz");
+    checkCuda(rt.cudaMemcpy(dreachOff.p, off.data(), off.size() * sizeof(int),
+                            cudaMemcpyHostToDevice),
+              "HtoD reachOff");
+    cachedReach = maxReach;
   }
 };
 
@@ -434,6 +498,7 @@ void Workspace::knearest_into_many(const double *xyz, std::size_t n,
   const int nOff = (nC + 1) * nF;
 
   impl_->ensure(nTot, nCtot, nOff);
+  impl_->ensureStencil(maxReach);
   auto &rt = CUDART::instance();
   checkCuda(rt.cudaMemset(impl_->dcellCount.p, 0,
                           static_cast<std::size_t>(nCtot) * sizeof(int)),
@@ -477,18 +542,20 @@ void Workspace::knearest_into_many(const double *xyz, std::size_t n,
   {
     std::vector<void *> a = {&impl_->dfolded.p, &impl_->dcellOf.p,
                              &impl_->dcellCount.p, &impl_->dcellOff.p,
-                             &impl_->dorder.p, &impl_->dsorted.p, &nI, &nF,
-                             &nCv};
+                             &impl_->dorder.p, &impl_->dsorted.p,
+                             &impl_->dhome.p, &nI, &nF, &nCv};
     kScat->launch(dim3(grid), dim3(block), 0, nullptr, a, true);
   }
   {
     std::vector<void *> a = {
-        &impl_->dsorted.p, &impl_->dcellOf.p, &impl_->dcellOff.p,
-        &impl_->dorder.p,  &nI,               &nF,
-        &nCv,              &nx,               &ny,
-        &nz,               &lx,               &ly,
-        &lz,               &cmin,             &kI,
-        &maxR,             &outP};
+        &impl_->dsorted.p,   &impl_->dcellOf.p, &impl_->dcellOff.p,
+        &impl_->dorder.p,    &impl_->dhome.p,   &impl_->dsdx.p,
+        &impl_->dsdy.p,      &impl_->dsdz.p,    &impl_->dreachOff.p,
+        &nI,                 &nF,               &nCv,
+        &nx,                 &ny,               &nz,
+        &lx,                 &ly,               &lz,
+        &cmin,               &kI,               &maxR,
+        &outP};
     kNear->launch(dim3(tppGrid), dim3(block), sh, nullptr, a, true);
   }
 }

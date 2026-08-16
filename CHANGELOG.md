@@ -4,9 +4,9 @@
 
 Optional gpulite device path: `linkcell::gpu::Workspace::knearest_into`
 writes the same packed `n * k` indices as the host walk (fold, bin,
-Chebyshev shells). The device walk stores cell-major coordinates
-(HOOMD / vesin), uses eight threads per source, and
-`knearest_into_many` covers a batch of frames in one launch.
+Chebyshev shells). The device walk uses a tiled exclusive scan, a precomputed
+Chebyshev stencil, cell-major coordinates with an O(1) home slot,
+eight threads per source, and `knearest_into_many` for a frame batch.
 Orthorhombic cells, `k <= 16`. Meson feature `with_gpulite`.
 
 ## 0.2.4
