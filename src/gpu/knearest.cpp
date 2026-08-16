@@ -23,7 +23,6 @@ constexpr int kMaxK = 16;
 constexpr int kMaxCells = 262144;
 
 const char *kKernels = R"CUDA(
-#define TPP 4
 __device__ inline int remEuclid(int a, int n) {
   int r = a % n;
   return r < 0 ? r + n : r;
@@ -169,9 +168,9 @@ extern "C" __global__ void knearest_shells(const double* __restrict__ sorted,
     const int* __restrict__ sdz, const int* __restrict__ reachOff,
     int n, int nFrames, int nC, int nx, int ny, int nz,
     double lx, double ly, double lz, double cellMin, int k, int maxReach,
-    int* __restrict__ out) {
-  const int lane = threadIdx.x % TPP;
-  const int gid = (blockIdx.x * blockDim.x + threadIdx.x) / TPP;
+    int tpp, int* __restrict__ out) {
+  const int lane = threadIdx.x % tpp;
+  const int gid = (blockIdx.x * blockDim.x + threadIdx.x) / tpp;
   const int active = gid < n * nFrames;
   const int f = active ? gid / n : 0;
   const int i = active ? gid % n : 0;
@@ -196,12 +195,12 @@ extern "C" __global__ void knearest_shells(const double* __restrict__ sorted,
   int bestJ[16];
   int found = 0;
   extern __shared__ unsigned char raw[];
-  const int ppb = blockDim.x / TPP;
-  const int pslot = threadIdx.x / TPP;
+  const int ppb = blockDim.x / tpp;
+  const int pslot = threadIdx.x / tpp;
   double* sh_d2 = (double*)raw;
-  int* sh_j = (int*)(sh_d2 + ppb * TPP * K);
-  int* sh_n = (int*)(sh_j + ppb * TPP * K);
-  int* sh_stop = sh_n + ppb * TPP;
+  int* sh_j = (int*)(sh_d2 + ppb * tpp * K);
+  int* sh_n = (int*)(sh_j + ppb * tpp * K);
+  int* sh_stop = sh_n + ppb * tpp;
   for (int reach = 1; reach <= maxReach; ++reach) {
     const int s0 = reachOff[reach];
     const int s1 = reachOff[reach + 1];
@@ -222,7 +221,7 @@ extern "C" __global__ void knearest_shells(const double* __restrict__ sorted,
         const int ncid = (ncz * ny + ncy) * nx + ncx;
         const int a0 = f * n + cellOff[f * (nC + 1) + ncid];
         const int a1 = f * n + cellOff[f * (nC + 1) + ncid + 1];
-        for (int s = a0 + lane; s < a1; s += TPP) {
+        for (int s = a0 + lane; s < a1; s += tpp) {
           const int j = order[s];
           if (j == i) continue;
           const double rx = sorted[s * 3 + 0] - ixp + sx;
@@ -234,8 +233,8 @@ extern "C" __global__ void knearest_shells(const double* __restrict__ sorted,
         }
       }
     }
-    const int base = (pslot * TPP + lane) * K;
-    sh_n[pslot * TPP + lane] = found;
+    const int base = (pslot * tpp + lane) * K;
+    sh_n[pslot * tpp + lane] = found;
     for (int t = 0; t < K; ++t) {
       sh_d2[base + t] = t < found ? bestR2[t] : 0;
       sh_j[base + t] = t < found ? bestJ[t] : -1;
@@ -243,9 +242,9 @@ extern "C" __global__ void knearest_shells(const double* __restrict__ sorted,
     __syncwarp();
     if (lane == 0) {
       found = 0;
-      for (int L = 0; L < TPP; ++L) {
-        const int nL = sh_n[pslot * TPP + L];
-        const int bL = (pslot * TPP + L) * K;
+      for (int L = 0; L < tpp; ++L) {
+        const int nL = sh_n[pslot * tpp + L];
+        const int bL = (pslot * tpp + L) * K;
         for (int t = 0; t < nL; ++t) {
           heapPush(bestR2, bestJ, &found, k, sh_d2[bL + t], sh_j[bL + t]);
         }
@@ -259,18 +258,18 @@ extern "C" __global__ void knearest_shells(const double* __restrict__ sorted,
         const double bound = (double)reach * cellMin;
         if (worst <= bound * bound) stop = 1;
       }
-      sh_n[pslot * TPP] = found;
+      sh_n[pslot * tpp] = found;
       sh_stop[pslot] = stop;
       for (int t = 0; t < found; ++t) {
-        sh_d2[pslot * TPP * K + t] = bestR2[t];
-        sh_j[pslot * TPP * K + t] = bestJ[t];
+        sh_d2[pslot * tpp * K + t] = bestR2[t];
+        sh_j[pslot * tpp * K + t] = bestJ[t];
       }
     }
     __syncwarp();
-    found = sh_n[pslot * TPP];
+    found = sh_n[pslot * tpp];
     for (int t = 0; t < found; ++t) {
-      bestR2[t] = sh_d2[pslot * TPP * K + t];
-      bestJ[t] = sh_j[pslot * TPP * K + t];
+      bestR2[t] = sh_d2[pslot * tpp * K + t];
+      bestJ[t] = sh_j[pslot * tpp * K + t];
     }
     if (sh_stop[pslot]) break;
   }
@@ -541,22 +540,51 @@ void Workspace::knearest_into_many(const double *xyz, std::size_t n,
   auto *kScat = factory.create("scatter_atoms", kKernels, "linkcell.cu", opt);
   auto *kNear = factory.create("knearest_shells", kKernels, "linkcell.cu", opt);
 
-  constexpr int tpp = 4;
-  int block = 128;
   const std::size_t kSlot = static_cast<std::size_t>(kI);
-  auto shBytes = [&](int blk) {
+  auto shBytes = [&](int blk, int tpp) {
     const int ppb = blk / tpp;
-    return static_cast<std::size_t>(ppb) * tpp * kSlot * sizeof(double) +
-           static_cast<std::size_t>(ppb) * tpp * kSlot * sizeof(int) +
-           static_cast<std::size_t>(ppb) * tpp * sizeof(int) +
+    return static_cast<std::size_t>(ppb) * static_cast<std::size_t>(tpp) *
+               kSlot * sizeof(double) +
+           static_cast<std::size_t>(ppb) * static_cast<std::size_t>(tpp) *
+               kSlot * sizeof(int) +
+           static_cast<std::size_t>(ppb) * static_cast<std::size_t>(tpp) *
+               sizeof(int) +
            static_cast<std::size_t>(ppb) * sizeof(int);
   };
-  if (shBytes(256) <= 48ull * 1024ull) {
-    block = 256;
+  int maxThreads = 1024;
+  try {
+    const int attr = kNear->getFuncAttribute(
+        CU_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK);
+    if (attr >= 32) {
+      maxThreads = attr;
+    }
+  } catch (const std::exception &) {
+  }
+  constexpr std::size_t kMaxSh = 48ull * 1024ull;
+  int tpp = 4;
+  int block = 128;
+  int bestParts = 0;
+  const int tppCands[] = {1, 2, 4, 8};
+  const int blkCands[] = {64, 128, 256, 512};
+  for (int tp : tppCands) {
+    for (int blk : blkCands) {
+      if (blk > maxThreads || blk % 32 != 0 || blk % tp != 0) {
+        continue;
+      }
+      if (shBytes(blk, tp) > kMaxSh) {
+        continue;
+      }
+      const int parts = blk / tp;
+      if (parts > bestParts) {
+        bestParts = parts;
+        tpp = tp;
+        block = blk;
+      }
+    }
   }
   const int grid = (nTot + block - 1) / block;
   const int tppGrid = (nTot * tpp + block - 1) / block;
-  const std::size_t sh = shBytes(block);
+  const std::size_t sh = shBytes(block, tpp);
   void *xyzP = const_cast<double *>(xyz);
   void *maskV = const_cast<int *>(mask);
   void *outP = out;
@@ -612,7 +640,7 @@ void Workspace::knearest_into_many(const double *xyz, std::size_t n,
                    &nx,                 &ny,               &nz,
                    &lx,                 &ly,               &lz,
                    &cmin,               &kI,               &maxR,
-                   &outP};
+                   &tpp,                &outP};
     auto a = launchArgs(raw, sizeof(raw) / sizeof(raw[0]));
     kNear->launch(dim3(tppGrid), dim3(block), sh, impl_->stream, a, false);
   }
