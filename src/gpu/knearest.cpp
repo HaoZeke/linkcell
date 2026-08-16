@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -528,34 +529,53 @@ void Workspace::knearest_into_many(const double *xyz, std::size_t n,
   double ox = cell.origin[0];
   double oy = cell.origin[1];
   double oz = cell.origin[2];
+  auto launchArgs = [](void **raw, std::size_t n) {
+    return std::vector<void *>(raw, raw + n);
+  };
   {
-    std::vector<void *> a = {&xyzP, &maskV, &nI, &nF, &lx, &ly, &lz, &ox, &oy,
-                             &oz,   &nx,    &ny, &nz, &nCv, &impl_->dcellOf.p,
-                             &impl_->dcellCount.p, &impl_->dfolded.p};
+    void *raw[] = {&xyzP,
+                   &maskV,
+                   &nI,
+                   &nF,
+                   &lx,
+                   &ly,
+                   &lz,
+                   &ox,
+                   &oy,
+                   &oz,
+                   &nx,
+                   &ny,
+                   &nz,
+                   &nCv,
+                   &impl_->dcellOf.p,
+                   &impl_->dcellCount.p,
+                   &impl_->dfolded.p};
+    auto a = launchArgs(raw, sizeof(raw) / sizeof(raw[0]));
     kBin->launch(dim3(grid), dim3(block), 0, nullptr, a, true);
   }
   {
-    std::vector<void *> a = {&impl_->dcellCount.p, &impl_->dcellOff.p, &nCv,
-                             &nF};
+    void *raw[] = {&impl_->dcellCount.p, &impl_->dcellOff.p, &nCv, &nF};
+    auto a = launchArgs(raw, sizeof(raw) / sizeof(raw[0]));
     kPref->launch(dim3(nF), dim3(128), 128 * sizeof(int), nullptr, a, true);
   }
   {
-    std::vector<void *> a = {&impl_->dfolded.p, &impl_->dcellOf.p,
-                             &impl_->dcellCount.p, &impl_->dcellOff.p,
-                             &impl_->dorder.p, &impl_->dsorted.p,
-                             &impl_->dhome.p, &nI, &nF, &nCv};
+    void *raw[] = {&impl_->dfolded.p,    &impl_->dcellOf.p, &impl_->dcellCount.p,
+                   &impl_->dcellOff.p,   &impl_->dorder.p,  &impl_->dsorted.p,
+                   &impl_->dhome.p,      &nI,               &nF,
+                   &nCv};
+    auto a = launchArgs(raw, sizeof(raw) / sizeof(raw[0]));
     kScat->launch(dim3(grid), dim3(block), 0, nullptr, a, true);
   }
   {
-    std::vector<void *> a = {
-        &impl_->dsorted.p,   &impl_->dcellOf.p, &impl_->dcellOff.p,
-        &impl_->dorder.p,    &impl_->dhome.p,   &impl_->dsdx.p,
-        &impl_->dsdy.p,      &impl_->dsdz.p,    &impl_->dreachOff.p,
-        &nI,                 &nF,               &nCv,
-        &nx,                 &ny,               &nz,
-        &lx,                 &ly,               &lz,
-        &cmin,               &kI,               &maxR,
-        &outP};
+    void *raw[] = {&impl_->dsorted.p,   &impl_->dcellOf.p, &impl_->dcellOff.p,
+                   &impl_->dorder.p,    &impl_->dhome.p,   &impl_->dsdx.p,
+                   &impl_->dsdy.p,      &impl_->dsdz.p,    &impl_->dreachOff.p,
+                   &nI,                 &nF,               &nCv,
+                   &nx,                 &ny,               &nz,
+                   &lx,                 &ly,               &lz,
+                   &cmin,               &kI,               &maxR,
+                   &outP};
+    auto a = launchArgs(raw, sizeof(raw) / sizeof(raw[0]));
     kNear->launch(dim3(tppGrid), dim3(block), sh, nullptr, a, true);
   }
 }
