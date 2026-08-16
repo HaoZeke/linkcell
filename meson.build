@@ -2,7 +2,7 @@ project(
   'linkcell',
   ['c', 'cpp'],
   # Keep in lockstep with Cargo.toml [package].version (source of truth).
-  version: '0.2.3',
+  version: '0.2.4',
   meson_version: '>=1.2.0',
   license: 'MIT',
   default_options: [
@@ -105,7 +105,12 @@ linkcell_built_h = custom_target(
   ],
   build_by_default: true,
 )
-_link_idx = get_option('default_library') == 'static' ? 1 : 0
+# A wrap consumer builds yodaLib static and then a Python/Lua module.
+# That consumer's default_library does not change this option, so a
+# shared default here would leave the module needing liblinkcell.so
+# at import time. Subprojects always take the static archive.
+_use_static = meson.is_subproject() or get_option('default_library') == 'static'
+_link_idx = _use_static ? 1 : 0
 linkcell_dep = declare_dependency(
   link_args: [linkcell_cargo[_link_idx].full_path()],
   sources: linkcell_built_h,

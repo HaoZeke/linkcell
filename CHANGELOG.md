@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.2.4
+
+A wrap consumer always links the static archive. The parent
+`default_library` does not change this option, so a shared default
+left `pydseams.yoda` needing `liblinkcell.so` at import time.
+
 ## 0.2.3
 
 A static `libyodaLib.a` no longer passes `liblinkcell.so` to `ar`.
