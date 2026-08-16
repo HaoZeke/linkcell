@@ -58,8 +58,8 @@ the a-face (distance 0.8) is nearer than the raw 9.2 vector.
 
 ## C++
 
-Same buffer contract. The in-place call returns a `Neighbours` view.
-Failure throws `linkcell::Error`.
+Same packed `n * k` contract. `Neighbours` owns the buffer. Failure
+throws `linkcell::Error`.
 
 ```cpp
 #include "linkcell.hpp"
@@ -68,7 +68,6 @@ Failure throws `linkcell::Error`.
 int main() {
   const linkcell::Cell box = linkcell::Cell::ortho(10.0, 10.0, 10.0);
   const double xyz[] = {0.0, 0.0, 0.0, 1.0, 0.0, 0.0};
-  int out[2];
   const linkcell::Neighbours nn = linkcell::knearest(xyz, 2, box, 1);
   std::cout << "0 -> " << nn.neighbour(0, 0) << "\n";
   std::cout << "1 -> " << nn.neighbour(1, 0) << "\n";

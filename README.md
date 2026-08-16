@@ -116,12 +116,12 @@ Neighbours of source `i` are `out[i*k + 0 ..]`, nearest first.
 
 const linkcell::Cell box = linkcell::Cell::ortho(10.0, 10.0, 10.0);
 const double xyz[] = {0.0, 0.0, 0.0, 1.0, 0.0, 0.0};
-int out[2];
 const linkcell::Neighbours nn = linkcell::knearest(xyz, 2, box, 1);
 ```
 
-Same packed `n * k` buffer as C. Unused slots are `-1`. `nn.neighbour(i,
-j)` reads `out[i * k + j]`. Failure throws `linkcell::Error`.
+`nn` owns the packed `n * k` buffer. Unused slots are `-1`.
+`nn.neighbour(i, j)` is the j-th neighbour of i. Failure throws
+`linkcell::Error`.
 
 ## Docs
 
