@@ -639,9 +639,9 @@ void Workspace::knearest_into_many(const double *xyz, std::size_t n,
   } catch (const std::exception &) {
   }
   constexpr std::size_t kMaxSh = 48ull * 1024ull;
-  // HOOMD times TPP 4/8 first; vesin hardcodes TPP=8. Maximising
-  // particles per block always picked TPP=1. Prefer occupant
-  // parallelism, then a 128/256 block that still fits shmem.
+  // HOOMD times TPP 4/8 first; vesin hardcodes TPP=8. Prefer
+  // occupant parallelism, then a 128/256 block that still fits
+  // shmem. Maximising particles per block forces TPP=1.
   int tpp = 4;
   int block = 128;
   bool picked = false;
