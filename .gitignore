@@ -97,6 +97,10 @@ vcpkg_installed/
 Testing/
 .cache/
 
+/subprojects/*
+!/subprojects/*.wrap
+!/subprojects/packagefiles/
+
 /target/
 /build/
 /build-meson/

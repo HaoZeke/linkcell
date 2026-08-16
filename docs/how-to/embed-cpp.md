@@ -38,6 +38,19 @@ installed prefix.
 ```cpp
 #include "linkcell.hpp"
 
+Device k-nearest (`linkcell_gpu.hpp`, meson `with_gpulite`) takes
+device pointers and writes the same packed buffer:
+
+```cpp
+#include "linkcell_gpu.hpp"
+
+linkcell::gpu::Workspace ws;
+ws.knearest_into(xyz_dev, n, cell, k, out_dev, n * k, nullptr, 5.5);
+```
+
+`linkcell::gpu::available()` is false when the library was built
+without gpulite or the CUDA driver is missing.
+
 const linkcell::Cell box = linkcell::Cell::ortho(10.0, 10.0, 10.0);
 const double xyz[] = {0.0, 0.0, 0.0, 1.0, 0.0, 0.0};
 const linkcell::Neighbours nn = linkcell::knearest(xyz, 2, box, 1);

@@ -10,7 +10,8 @@ vesin builds cutoff pair lists. nanoflann builds Euclidean KD-trees without a
 minimum-image convention. This crate is the piece those two leave open: the
 linked-cell walk of Allen and Tildesley (*Computer Simulation of Liquids*),
 a k-heap per source, shells expanded until the k-th neighbour cannot sit
-outside the visited cube.
+outside the visited cube. The optional gpulite path runs that walk on a
+CUDA device (`linkcell::gpu::Workspace`); pair lists stay on the device.
 
 It is a LODE library. The Rust crate is the implementation. The C ABI
 (`lc_*`) is the hourglass waist, the same shape as

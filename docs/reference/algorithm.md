@@ -71,3 +71,12 @@ general: fractional wrap). It is not the production walk.
 
 The `parallel` Cargo feature (on by default) maps sources with
 rayon. Each source owns its heap.
+
+## Device
+
+`linkcell::gpu::Workspace` is the same walk on a CUDA device: host
+bin counts, fold into the primary cell, exclusive scan, then one
+source per thread over Chebyshev shells with the same stop
+(`worst <= (reach * cell_min)^2`). The workspace keeps the bin
+arrays. Orthorhombic cells only; `k <= 16`. Pair lists stay on the
+device. vesin CUDA is the cutoff-pair counterpart; this is k-nearest.

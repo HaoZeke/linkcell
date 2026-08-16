@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+Optional gpulite device path: `linkcell::gpu::Workspace::knearest_into`
+writes the same packed `n * k` indices as the host walk (fold, bin,
+Chebyshev shells). Orthorhombic cells, `k <= 16`. `xyz` and `out`
+are CUDA device pointers. Meson feature `with_gpulite`.
+
 ## 0.2.4
 
 A wrap consumer always links the static archive. The parent

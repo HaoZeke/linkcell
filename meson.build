@@ -111,17 +111,47 @@ linkcell_built_h = custom_target(
 # at import time. Subprojects always take the static archive.
 _use_static = meson.is_subproject() or get_option('default_library') == 'static'
 _link_idx = _use_static ? 1 : 0
+
+_gpu_opt = get_option('with_gpulite')
+gpulite_dep = dependency('gpulite', required: false,
+                         fallback: ['gpulite', 'gpulite_dep'])
+if _gpu_opt.enabled() and not gpulite_dep.found()
+  error('with_gpulite=enabled but gpulite was not found')
+endif
+_gpu_on = gpulite_dep.found() and not _gpu_opt.disabled()
+_gpu_deps = []
+_gpu_args = []
+_gpu_src = []
+if _gpu_on
+  _gpu_args += ['-DLINKCELL_HAS_GPULITE=1']
+  linkcell_gpu = static_library(
+    'linkcell_gpu',
+    'src/gpu/knearest.cpp',
+    include_directories: include_directories('include'),
+    dependencies: [gpulite_dep],
+    cpp_args: _gpu_args,
+    install: _install,
+  )
+  _gpu_deps += [declare_dependency(
+    link_with: linkcell_gpu,
+    include_directories: include_directories('include'),
+    compile_args: _gpu_args,
+    dependencies: [gpulite_dep])]
+endif
+
 linkcell_dep = declare_dependency(
   link_args: [linkcell_cargo[_link_idx].full_path()],
   sources: linkcell_built_h,
   include_directories: include_directories('include'),
-  dependencies: rust_sys,
+  dependencies: rust_sys + _gpu_deps,
+  compile_args: _gpu_args,
   version: meson.project_version(),
 )
 meson.override_dependency('linkcell', linkcell_dep)
 
 if _install
-  install_headers('include/linkcell.h', 'include/linkcell.hpp')
+  install_headers('include/linkcell.h', 'include/linkcell.hpp',
+                  'include/linkcell_gpu.hpp')
   pkg = import('pkgconfig')
   pkg.generate(
     name: 'linkcell',
@@ -136,6 +166,10 @@ if _install
     subdirs: '.',
   )
 endif
+
+summary({
+  'Device k-nearest (gpulite)': _gpu_on,
+}, section: 'Configuration')
 
 if get_option('with_tests')
   test(
