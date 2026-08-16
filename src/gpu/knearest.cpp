@@ -23,7 +23,7 @@ constexpr int kMaxK = 16;
 constexpr int kMaxCells = 262144;
 
 const char *kKernels = R"CUDA(
-#define TPP 8
+#define TPP 4
 __device__ inline int remEuclid(int a, int n) {
   int r = a % n;
   return r < 0 ? r + n : r;
@@ -191,6 +191,7 @@ extern "C" __global__ void knearest_shells(const double* __restrict__ sorted,
     iyp = sorted[dest * 3 + 1];
     izp = sorted[dest * 3 + 2];
   }
+  const int K = k;
   double bestR2[16];
   int bestJ[16];
   int found = 0;
@@ -198,8 +199,8 @@ extern "C" __global__ void knearest_shells(const double* __restrict__ sorted,
   const int ppb = blockDim.x / TPP;
   const int pslot = threadIdx.x / TPP;
   double* sh_d2 = (double*)raw;
-  int* sh_j = (int*)(sh_d2 + ppb * TPP * 16);
-  int* sh_n = (int*)(sh_j + ppb * TPP * 16);
+  int* sh_j = (int*)(sh_d2 + ppb * TPP * K);
+  int* sh_n = (int*)(sh_j + ppb * TPP * K);
   int* sh_stop = sh_n + ppb * TPP;
   for (int reach = 1; reach <= maxReach; ++reach) {
     const int s0 = reachOff[reach];
@@ -233,9 +234,9 @@ extern "C" __global__ void knearest_shells(const double* __restrict__ sorted,
         }
       }
     }
-    const int base = (pslot * TPP + lane) * 16;
+    const int base = (pslot * TPP + lane) * K;
     sh_n[pslot * TPP + lane] = found;
-    for (int t = 0; t < 16; ++t) {
+    for (int t = 0; t < K; ++t) {
       sh_d2[base + t] = t < found ? bestR2[t] : 0;
       sh_j[base + t] = t < found ? bestJ[t] : -1;
     }
@@ -244,7 +245,7 @@ extern "C" __global__ void knearest_shells(const double* __restrict__ sorted,
       found = 0;
       for (int L = 0; L < TPP; ++L) {
         const int nL = sh_n[pslot * TPP + L];
-        const int bL = (pslot * TPP + L) * 16;
+        const int bL = (pslot * TPP + L) * K;
         for (int t = 0; t < nL; ++t) {
           heapPush(bestR2, bestJ, &found, k, sh_d2[bL + t], sh_j[bL + t]);
         }
@@ -261,15 +262,15 @@ extern "C" __global__ void knearest_shells(const double* __restrict__ sorted,
       sh_n[pslot * TPP] = found;
       sh_stop[pslot] = stop;
       for (int t = 0; t < found; ++t) {
-        sh_d2[pslot * TPP * 16 + t] = bestR2[t];
-        sh_j[pslot * TPP * 16 + t] = bestJ[t];
+        sh_d2[pslot * TPP * K + t] = bestR2[t];
+        sh_j[pslot * TPP * K + t] = bestJ[t];
       }
     }
     __syncwarp();
     found = sh_n[pslot * TPP];
     for (int t = 0; t < found; ++t) {
-      bestR2[t] = sh_d2[pslot * TPP * 16 + t];
-      bestJ[t] = sh_j[pslot * TPP * 16 + t];
+      bestR2[t] = sh_d2[pslot * TPP * K + t];
+      bestJ[t] = sh_j[pslot * TPP * K + t];
     }
     if (sh_stop[pslot]) break;
   }
@@ -540,14 +541,22 @@ void Workspace::knearest_into_many(const double *xyz, std::size_t n,
   auto *kScat = factory.create("scatter_atoms", kKernels, "linkcell.cu", opt);
   auto *kNear = factory.create("knearest_shells", kKernels, "linkcell.cu", opt);
 
-  const int block = 128;
+  constexpr int tpp = 4;
+  int block = 128;
+  const std::size_t kSlot = static_cast<std::size_t>(kI);
+  auto shBytes = [&](int blk) {
+    const int ppb = blk / tpp;
+    return static_cast<std::size_t>(ppb) * tpp * kSlot * sizeof(double) +
+           static_cast<std::size_t>(ppb) * tpp * kSlot * sizeof(int) +
+           static_cast<std::size_t>(ppb) * tpp * sizeof(int) +
+           static_cast<std::size_t>(ppb) * sizeof(int);
+  };
+  if (shBytes(256) <= 48ull * 1024ull) {
+    block = 256;
+  }
   const int grid = (nTot + block - 1) / block;
-  const int tppGrid = (nTot * 8 + block - 1) / block;
-  const int ppb = block / 8;
-  const std::size_t sh = static_cast<std::size_t>(ppb) * 8 * 16 * sizeof(double) +
-                         static_cast<std::size_t>(ppb) * 8 * 16 * sizeof(int) +
-                         static_cast<std::size_t>(ppb) * 8 * sizeof(int) +
-                         static_cast<std::size_t>(ppb) * sizeof(int);
+  const int tppGrid = (nTot * tpp + block - 1) / block;
+  const std::size_t sh = shBytes(block);
   void *xyzP = const_cast<double *>(xyz);
   void *maskV = const_cast<int *>(mask);
   void *outP = out;
