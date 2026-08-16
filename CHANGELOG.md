@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.1
+
 Device `Workspace` folds with `Hinv` and shifts with
 `na a + nb b + nc c`. Sheared cells use the host walk. `k <= 16`.
 
