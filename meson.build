@@ -2,7 +2,7 @@ project(
   'linkcell',
   ['c', 'cpp'],
   # Keep in lockstep with Cargo.toml [package].version (source of truth).
-  version: '0.2.2',
+  version: '0.2.3',
   meson_version: '>=1.2.0',
   license: 'MIT',
   default_options: [
@@ -92,10 +92,23 @@ endif
 
 # link_args rather than link_with: Meson promotes installed static
 # consumers to link_whole, and link_whole rejects custom_targets.
+# Do not attach the cargo outputs as sources: a static consumer then
+# passes liblinkcell.so to `ar` ("file format not recognized").
+linkcell_built_h = custom_target(
+  'linkcell-built-h',
+  input: linkcell_cargo,
+  output: 'linkcell_built.h',
+  command: [
+    py,
+    '-c',
+    'from pathlib import Path; Path("@OUTPUT@").write_text("#pragma once\\n")',
+  ],
+  build_by_default: true,
+)
 _link_idx = get_option('default_library') == 'static' ? 1 : 0
 linkcell_dep = declare_dependency(
   link_args: [linkcell_cargo[_link_idx].full_path()],
-  sources: linkcell_cargo,
+  sources: linkcell_built_h,
   include_directories: include_directories('include'),
   dependencies: rust_sys,
   version: meson.project_version(),
