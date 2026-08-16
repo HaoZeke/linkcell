@@ -1,5 +1,9 @@
 # linkcell
 
+<p align="center">
+  <img src="assets/branding/linkcell-logo-light.svg" width="360" alt="linkcell">
+</p>
+
 Periodic **linked-cell k-nearest** neighbour search for molecular simulations.
 
 vesin builds cutoff pair lists. nanoflann builds Euclidean KD-trees without a

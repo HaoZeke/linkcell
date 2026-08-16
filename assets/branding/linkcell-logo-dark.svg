@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="112" viewBox="0 0 420 112" fill="none" role="img" aria-labelledby="lcDarkTitle">
+  <title id="lcDarkTitle">linkcell</title>
+  <desc>Periodic linked-cell k-nearest neighbour search</desc>
+  <rect x="8" y="16" width="80" height="80" rx="18" fill="#312E81"/>
+  <path d="M22 40 L58 32 L66 74 L30 82 Z" fill="#1E1B4B" stroke="#C7D2FE" stroke-width="2"/>
+  <path d="M34 38 L40 72" stroke="#818CF8" stroke-width="1.4"/>
+  <path d="M46 36 L52 70" stroke="#818CF8" stroke-width="1.4"/>
+  <path d="M24 54 L62 46" stroke="#818CF8" stroke-width="1.4"/>
+  <path d="M26 66 L64 58" stroke="#818CF8" stroke-width="1.4"/>
+  <path d="M24 56 C16 54 16 46 24 44" fill="none" stroke="#FBBF24" stroke-width="1.8" stroke-linecap="round"/>
+  <path d="M44 55 L36 48 M44 55 L54 43 M44 55 L56 62 M44 55 L38 68" stroke="#E0E7FF" stroke-width="1.7" stroke-linecap="round"/>
+  <circle cx="44" cy="55" r="3.2" fill="#EEF2FF"/>
+  <circle cx="36" cy="48" r="2.5" fill="#FBBF24"/>
+  <circle cx="54" cy="43" r="2.5" fill="#FBBF24"/>
+  <circle cx="56" cy="62" r="2.5" fill="#FBBF24"/>
+  <circle cx="38" cy="68" r="2.5" fill="#FBBF24"/>
+  <text x="108" y="58" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+        font-size="34" font-weight="750" letter-spacing="-1.1" fill="#F8FAFC">linkcell</text>
+  <text x="108" y="82" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+        font-size="14" font-weight="600" letter-spacing="0.14em" fill="#A5B4FC">PERIODIC k-NN</text>
+</svg>

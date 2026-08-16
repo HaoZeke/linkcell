@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-### 0.2.1
+## 0.2.1
 
 - `Error::MaskLen` when `mask` is `Some` and `mask.len() != n`.
 - `Error::Overflow` when `n * k` does not fit a slice. `BufferSize`
