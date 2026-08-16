@@ -294,6 +294,11 @@ extern "C" __global__ void knearest_shells(const double* __restrict__ sorted,
   }
   for (int t = 0; t < found; ++t) out[id * k + t] = bestJ[t];
 }
+
+extern "C" __global__ void zero_i32(int* p, int n) {
+  const int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) p[i] = 0;
+}
 )CUDA";
 
 void checkCuda(cudaError_t st, const char *what) {
@@ -366,11 +371,14 @@ struct Workspace::Impl {
   int capN = 0;
   int capC = 0;
   int capSt = 0;
+  int capF = 0;
   int cachedReach = -1;
   cudaStream_t stream = nullptr;
   DevPtr dcellOf, dcellCount, dcellOff, dorder, dfolded, dsorted, dhome;
   DevPtr dsdx, dsdy, dsdz, dreachOff;
   DevPtr dlx, dly, dlz, dcmin;
+  std::vector<int> hsdx, hsdy, hsdz, hsoff;
+  std::vector<double> hLx, hLy, hLz, hCmin;
 
   void ensureStream() {
     if (stream == nullptr) {
@@ -411,32 +419,48 @@ struct Workspace::Impl {
     }
   }
 
+  void ensureBox(int nF) {
+    if (nF <= capF && dlx.p != nullptr) {
+      return;
+    }
+    capF = nF;
+    const std::size_t bytes = static_cast<std::size_t>(capF) * sizeof(double);
+    growOne(dlx, bytes, "lx");
+    growOne(dly, bytes, "ly");
+    growOne(dlz, bytes, "lz");
+    growOne(dcmin, bytes, "cmin");
+  }
+
   void ensureStencil(int maxReach) {
     if (cachedReach == maxReach && dsdx.p != nullptr) {
       return;
     }
-    std::vector<int> dx, dy, dz, off;
-    buildStencil(maxReach, dx, dy, dz, off);
-    const int nSt = static_cast<int>(dx.size());
+    buildStencil(maxReach, hsdx, hsdy, hsdz, hsoff);
+    const int nSt = static_cast<int>(hsdx.size());
     if (nSt > capSt) {
       capSt = nSt;
       growOne(dsdx, static_cast<std::size_t>(capSt) * sizeof(int), "sdx");
       growOne(dsdy, static_cast<std::size_t>(capSt) * sizeof(int), "sdy");
       growOne(dsdz, static_cast<std::size_t>(capSt) * sizeof(int), "sdz");
     }
-    growOne(dreachOff, off.size() * sizeof(int), "reachOff");
+    growOne(dreachOff, hsoff.size() * sizeof(int), "reachOff");
+    ensureStream();
     auto &rt = CUDART::instance();
-    checkCuda(rt.cudaMemcpy(dsdx.p, dx.data(), dx.size() * sizeof(int),
-                            cudaMemcpyHostToDevice),
+    checkCuda(rt.cudaMemcpyAsync(dsdx.p, hsdx.data(),
+                                 hsdx.size() * sizeof(int),
+                                 cudaMemcpyHostToDevice, stream),
               "HtoD sdx");
-    checkCuda(rt.cudaMemcpy(dsdy.p, dy.data(), dy.size() * sizeof(int),
-                            cudaMemcpyHostToDevice),
+    checkCuda(rt.cudaMemcpyAsync(dsdy.p, hsdy.data(),
+                                 hsdy.size() * sizeof(int),
+                                 cudaMemcpyHostToDevice, stream),
               "HtoD sdy");
-    checkCuda(rt.cudaMemcpy(dsdz.p, dz.data(), dz.size() * sizeof(int),
-                            cudaMemcpyHostToDevice),
+    checkCuda(rt.cudaMemcpyAsync(dsdz.p, hsdz.data(),
+                                 hsdz.size() * sizeof(int),
+                                 cudaMemcpyHostToDevice, stream),
               "HtoD sdz");
-    checkCuda(rt.cudaMemcpy(dreachOff.p, off.data(), off.size() * sizeof(int),
-                            cudaMemcpyHostToDevice),
+    checkCuda(rt.cudaMemcpyAsync(dreachOff.p, hsoff.data(),
+                                 hsoff.size() * sizeof(int),
+                                 cudaMemcpyHostToDevice, stream),
               "HtoD reachOff");
     cachedReach = maxReach;
   }
@@ -536,47 +560,59 @@ void Workspace::knearest_into_many(const double *xyz, std::size_t n,
   impl_->ensureStream();
   auto &rt = CUDART::instance();
   const std::size_t fSz = static_cast<std::size_t>(nF);
-  std::vector<double> hLx(fSz, lx), hLy(fSz, ly), hLz(fSz, lz), hCmin(fSz, cellMin);
+  impl_->ensureBox(nF);
+  impl_->hLx.assign(fSz, lx);
+  impl_->hLy.assign(fSz, ly);
+  impl_->hLz.assign(fSz, lz);
+  impl_->hCmin.assign(fSz, cellMin);
   if (frameBox != nullptr) {
     for (int f = 0; f < nF; ++f) {
-      hLx[static_cast<std::size_t>(f)] = frameBox[static_cast<std::size_t>(f) * 3 + 0];
-      hLy[static_cast<std::size_t>(f)] = frameBox[static_cast<std::size_t>(f) * 3 + 1];
-      hLz[static_cast<std::size_t>(f)] = frameBox[static_cast<std::size_t>(f) * 3 + 2];
-      const int fnx = std::max(1, static_cast<int>(std::floor(hLx[static_cast<std::size_t>(f)] / edge)));
-      const int fny = std::max(1, static_cast<int>(std::floor(hLy[static_cast<std::size_t>(f)] / edge)));
-      const int fnz = std::max(1, static_cast<int>(std::floor(hLz[static_cast<std::size_t>(f)] / edge)));
+      impl_->hLx[static_cast<std::size_t>(f)] =
+          frameBox[static_cast<std::size_t>(f) * 3 + 0];
+      impl_->hLy[static_cast<std::size_t>(f)] =
+          frameBox[static_cast<std::size_t>(f) * 3 + 1];
+      impl_->hLz[static_cast<std::size_t>(f)] =
+          frameBox[static_cast<std::size_t>(f) * 3 + 2];
+      const int fnx = std::max(
+          1, static_cast<int>(std::floor(
+                 impl_->hLx[static_cast<std::size_t>(f)] / edge)));
+      const int fny = std::max(
+          1, static_cast<int>(std::floor(
+                 impl_->hLy[static_cast<std::size_t>(f)] / edge)));
+      const int fnz = std::max(
+          1, static_cast<int>(std::floor(
+                 impl_->hLz[static_cast<std::size_t>(f)] / edge)));
       if (fnx != nx || fny != ny || fnz != nz) {
         throw Error("frame boxes need the same cell grid");
       }
-      hCmin[static_cast<std::size_t>(f)] = std::min(
-          hLx[static_cast<std::size_t>(f)] / static_cast<double>(nx),
-          std::min(hLy[static_cast<std::size_t>(f)] / static_cast<double>(ny),
-                   hLz[static_cast<std::size_t>(f)] / static_cast<double>(nz)));
+      impl_->hCmin[static_cast<std::size_t>(f)] = std::min(
+          impl_->hLx[static_cast<std::size_t>(f)] / static_cast<double>(nx),
+          std::min(impl_->hLy[static_cast<std::size_t>(f)] /
+                       static_cast<double>(ny),
+                   impl_->hLz[static_cast<std::size_t>(f)] /
+                       static_cast<double>(nz)));
     }
   }
-  growOne(impl_->dlx, fSz * sizeof(double), "lx");
-  growOne(impl_->dly, fSz * sizeof(double), "ly");
-  growOne(impl_->dlz, fSz * sizeof(double), "lz");
-  growOne(impl_->dcmin, fSz * sizeof(double), "cmin");
-  checkCuda(rt.cudaMemcpy(impl_->dlx.p, hLx.data(), fSz * sizeof(double),
-                          cudaMemcpyHostToDevice),
+  checkCuda(rt.cudaMemcpyAsync(impl_->dlx.p, impl_->hLx.data(),
+                               fSz * sizeof(double), cudaMemcpyHostToDevice,
+                               impl_->stream),
             "HtoD lx");
-  checkCuda(rt.cudaMemcpy(impl_->dly.p, hLy.data(), fSz * sizeof(double),
-                          cudaMemcpyHostToDevice),
+  checkCuda(rt.cudaMemcpyAsync(impl_->dly.p, impl_->hLy.data(),
+                               fSz * sizeof(double), cudaMemcpyHostToDevice,
+                               impl_->stream),
             "HtoD ly");
-  checkCuda(rt.cudaMemcpy(impl_->dlz.p, hLz.data(), fSz * sizeof(double),
-                          cudaMemcpyHostToDevice),
+  checkCuda(rt.cudaMemcpyAsync(impl_->dlz.p, impl_->hLz.data(),
+                               fSz * sizeof(double), cudaMemcpyHostToDevice,
+                               impl_->stream),
             "HtoD lz");
-  checkCuda(rt.cudaMemcpy(impl_->dcmin.p, hCmin.data(), fSz * sizeof(double),
-                          cudaMemcpyHostToDevice),
+  checkCuda(rt.cudaMemcpyAsync(impl_->dcmin.p, impl_->hCmin.data(),
+                               fSz * sizeof(double), cudaMemcpyHostToDevice,
+                               impl_->stream),
             "HtoD cmin");
-  checkCuda(rt.cudaMemset(impl_->dcellCount.p, 0,
-                          static_cast<std::size_t>(nCtot) * sizeof(int)),
-            "zero cells");
-  checkCuda(rt.cudaDeviceSynchronize(), "setup");
 
   auto &factory = KernelFactory::instance(0);
   const std::vector<std::string> opt{"-std=c++17"};
+  auto *kZero = factory.create("zero_i32", kKernels, "linkcell.cu", opt);
   auto *kBin = factory.create("bin_atoms", kKernels, "linkcell.cu", opt);
   auto *kPref = factory.create("prefix_cells", kKernels, "linkcell.cu", opt);
   auto *kScat = factory.create("scatter_atoms", kKernels, "linkcell.cu", opt);
@@ -603,11 +639,14 @@ void Workspace::knearest_into_many(const double *xyz, std::size_t n,
   } catch (const std::exception &) {
   }
   constexpr std::size_t kMaxSh = 48ull * 1024ull;
+  // HOOMD times TPP 4/8 first; vesin hardcodes TPP=8. Maximising
+  // particles per block always picked TPP=1. Prefer occupant
+  // parallelism, then a 128/256 block that still fits shmem.
   int tpp = 4;
   int block = 128;
-  int bestParts = 0;
-  const int tppCands[] = {1, 2, 4, 8};
-  const int blkCands[] = {64, 128, 256, 512};
+  bool picked = false;
+  const int tppCands[] = {8, 4, 2, 1};
+  const int blkCands[] = {256, 128, 64, 512};
   for (int tp : tppCands) {
     for (int blk : blkCands) {
       if (blk > maxThreads || blk % 32 != 0 || blk % tp != 0) {
@@ -616,12 +655,13 @@ void Workspace::knearest_into_many(const double *xyz, std::size_t n,
       if (shBytes(blk, tp) > kMaxSh) {
         continue;
       }
-      const int parts = blk / tp;
-      if (parts > bestParts) {
-        bestParts = parts;
-        tpp = tp;
-        block = blk;
-      }
+      tpp = tp;
+      block = blk;
+      picked = true;
+      break;
+    }
+    if (picked) {
+      break;
     }
   }
   if (const char *envTpp = std::getenv("LINKCELL_TPP")) {
@@ -653,6 +693,13 @@ void Workspace::knearest_into_many(const double *xyz, std::size_t n,
     return std::vector<void *>(raw, raw + n);
   };
   {
+    int nZero = nCtot;
+    const int zGrid = (nZero + 255) / 256;
+    void *raw[] = {&impl_->dcellCount.p, &nZero};
+    auto a = launchArgs(raw, sizeof(raw) / sizeof(raw[0]));
+    kZero->launch(dim3(zGrid), dim3(256), 0, impl_->stream, a, false);
+  }
+  {
     void *raw[] = {&xyzP,
                    &maskV,
                    &nI,
@@ -676,7 +723,7 @@ void Workspace::knearest_into_many(const double *xyz, std::size_t n,
   {
     void *raw[] = {&impl_->dcellCount.p, &impl_->dcellOff.p, &nCv, &nF};
     auto a = launchArgs(raw, sizeof(raw) / sizeof(raw[0]));
-    kPref->launch(dim3(nF), dim3(128), 128 * sizeof(int), impl_->stream, a,
+    kPref->launch(dim3(nF), dim3(256), 256 * sizeof(int), impl_->stream, a,
                   false);
   }
   {
