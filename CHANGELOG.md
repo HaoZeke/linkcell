@@ -8,6 +8,8 @@ Two wheels: `abi3-py312` (GIL, CPython 3.12+) and `abi3t-py315`
 (PEP 803, CPython 3.15 GIL and free-threaded). cibuildwheel 4.x
 builds 3.15.0rc1 by default. PyO3 0.29 `abi3t-py315`; maturin
 1.14+ tags the `abi3t` ABI. The 0.3.2 `cp314t` set is gone.
+cibuildwheel's abi3audit step is off for the abi3t job: current
+abi3audit flags PEP 793 `PyModExport` and `PyType_FromSlots`.
 
 ## 0.3.2
 
