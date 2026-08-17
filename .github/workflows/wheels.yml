@@ -58,6 +58,8 @@ jobs:
           path: ./wheelhouse/*.whl
 
   # One abi3t wheel per platform (CPython 3.15+ GIL and free-threaded).
+  # abi3audit --strict still treats PEP 793 PyModExport / PyType_FromSlots
+  # as non-abi3, so the audit step is off for this job only.
   abi3t:
     name: abi3t ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
@@ -87,6 +89,7 @@ jobs:
           CIBW_SKIP: "*musllinux* *i686* cp3??t-*"
           CIBW_ARCHS: ${{ matrix.arch }}
           CIBW_ENVIRONMENT: MATURIN_PEP517_ARGS="--features abi3t"
+          CIBW_AUDIT_COMMAND: ""
           CIBW_TEST_REQUIRES: pytest numpy
           CIBW_TEST_COMMAND: pytest {project}/tests/python -q
       - uses: actions/upload-artifact@v4
