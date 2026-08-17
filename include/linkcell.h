@@ -115,6 +115,8 @@ extern "C" {
  * shared across threads, is valid until the next `lc_*` call on this
  * thread, and must not be freed.
  *
+ * # Safety
+ *
  * `xyz` is aligned for `double` and readable for `n * 3` doubles.
  * `simbox` is aligned and points at one valid `lc_cell`.
  * `out_nn` is aligned for `int` and writable for `n * k` ints.
@@ -134,6 +136,11 @@ int lc_knearest(const double *xyz,
  *
  * `out_d2` is caller-owned, length `n * k`. Unused slots are `NaN`.
  * `out_d2` may be `NULL` to skip distances (same as [`lc_knearest`]).
+ *
+ * # Safety
+ *
+ * Same pointer contract as [`lc_knearest`]. `out_d2`, if non-null,
+ * is aligned for `double` and writable for `n * k` doubles.
  */
 int lc_knearest_d2(const double *xyz,
                    size_t n,
@@ -148,6 +155,13 @@ int lc_knearest_d2(const double *xyz,
  * Frame-major batch. `xyz` is `n_frames * n` packed triples.
  * `out_nn` / `out_d2` are `n_frames * n * k`. One shared cell.
  * `mask` is length `n` or `NULL`. `out_d2` may be `NULL`.
+ *
+ * # Safety
+ *
+ * `xyz` is readable for `n_frames * n * 3` doubles. `out_nn` is
+ * writable for `n_frames * n * k` ints. `out_d2`, if non-null, is
+ * writable for `n_frames * n * k` doubles. `simbox` and `mask`
+ * follow [`lc_knearest`].
  */
 int lc_knearest_many(const double *xyz,
                      size_t n,
