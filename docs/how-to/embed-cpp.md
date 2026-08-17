@@ -38,24 +38,28 @@ installed prefix.
 ```cpp
 #include "linkcell.hpp"
 
+const linkcell::Cell box = linkcell::Cell::ortho(10.0, 10.0, 10.0);
+const double xyz[] = {0.0, 0.0, 0.0, 1.0, 0.0, 0.0};
+const linkcell::Neighbours nn = linkcell::knearest(xyz, 2, box, 1);
+int j = nn.neighbour(0, 0);
+double r2 = nn.dist2(0, 0);
+```
+
 Device k-nearest (`linkcell_gpu.hpp`, meson `with_gpulite`) takes
-device pointers and writes the same packed buffer:
+device pointers and writes the same packed buffer. A device-packed
+cell (3 / 9 / 12 doubles) is inverted on device:
 
 ```cpp
 #include "linkcell_gpu.hpp"
 
 linkcell::gpu::Workspace ws;
 ws.knearest_into(xyz_dev, n, cell, k, out_dev, n * k, nullptr, 5.5);
+ws.knearest_into_many_dcell(xyz_dev, n, 1, cell_dev, 9, k, out_dev,
+                            n * k);
 ```
 
 `linkcell::gpu::available()` is false when the library was built
 without gpulite or the CUDA driver is missing.
-
-const linkcell::Cell box = linkcell::Cell::ortho(10.0, 10.0, 10.0);
-const double xyz[] = {0.0, 0.0, 0.0, 1.0, 0.0, 0.0};
-const linkcell::Neighbours nn = linkcell::knearest(xyz, 2, box, 1);
-int j = nn.neighbour(0, 0);
-```
 
 A general parallelepiped is `linkcell::Cell::from_vectors(a, b, c,
 origin)`. `Cell::raw()` is the `lc_cell` the ABI consumes.

@@ -62,6 +62,8 @@ can beat the k-th neighbour, and the walk stops.
 
 `knearest` returns `Neighbors` rows (`indices`, `dist2`), nearest
 first. `knearest_into` / `lc_knearest` write packed indices.
+`knearest_into_d2` / `lc_knearest_d2` also write squared distances.
+`knearest_into_many` / `lc_knearest_many` cover a frame-major batch.
 
 `knearest_brute` is the all-pairs check used by tests and small
 systems. It calls `Cell::dist2` per pair (ortho: three wraps;

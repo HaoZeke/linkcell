@@ -7,8 +7,10 @@ Device searches use `lc_gpu_*` (`include/linkcell_gpu.h`).
 
 `lc_knearest` takes packed `double` xyz (`n` triples), `size_t n`,
 `size_t k`, and a caller-owned `int` buffer of length `n * k`. Unused
-slots are `-1`. Returns 0 on success. On failure, read `lc_last_error()`
-on the same thread and do not free the pointer.
+slots are `-1`. `lc_knearest_d2` also writes squared distances.
+`lc_knearest_many` is the frame-major batch. Returns 0 on success. On
+failure, read `lc_last_error()` on the same thread and do not free
+the pointer.
 
 ## Meson wrap
 

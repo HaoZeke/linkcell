@@ -27,6 +27,14 @@ plus an origin. `lc_cell_ortho` builds a diagonal box at the origin.
 int lc_knearest(const double *xyz, size_t n, const lc_cell *simbox,
                 size_t k, const int *mask, double cell_hint,
                 int *out_nn);
+
+int lc_knearest_d2(const double *xyz, size_t n, const lc_cell *simbox,
+                   size_t k, const int *mask, double cell_hint,
+                   int *out_nn, double *out_d2);
+
+int lc_knearest_many(const double *xyz, size_t n, size_t n_frames,
+                     const lc_cell *simbox, size_t k, const int *mask,
+                     double cell_hint, int *out_nn, double *out_d2);
 ```
 
 | Argument | Contract |
@@ -38,8 +46,10 @@ int lc_knearest(const double *xyz, size_t n, const lc_cell *simbox,
 | `mask` | `NULL` (keep every point) or `n` ints, nonzero to include. A zero drops the point as both source and candidate. |
 | `cell_hint` | Target bin edge. `<= 0` selects the default (3.0 in box units). |
 | `out_nn` | Caller-owned, length `n * k`. Unused slots are `-1`. Neighbours of source `i` are `out_nn[i*k + t]`, nearest first. |
+| `out_d2` | Optional. Caller-owned, length `n * k` (`n_frames * n * k` for `lc_knearest_many`). Unused slots are `NaN`. `NULL` skips distances. |
+| `n_frames` | Frame count for `lc_knearest_many`. `xyz` is frame-major. |
 
-Returns 0 on success, nonzero on failure.
+`lc_knearest` is the one-frame, indices-only entry. Returns 0 on success, nonzero on failure.
 
 ## Errors and version
 
@@ -72,9 +82,11 @@ struct Cell {
 
 class Neighbours {
   int neighbour(std::size_t i, std::size_t j) const; /* or -1 */
+  double dist2(std::size_t i, std::size_t j) const;  /* unused NaN */
   std::size_t n() const;
   std::size_t k() const;
   const int *data() const;
+  const double *distances() const;
 };
 
 void knearest_into(const double *xyz, std::size_t n, const Cell &cell,

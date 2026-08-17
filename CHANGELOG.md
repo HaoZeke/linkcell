@@ -3,14 +3,18 @@
 ## Unreleased
 
 Python `linkcell` module (maturin / PyO3). Arrays are DLPack via
-dlpk: any `__dlpack__()` object in, DLPack int32 `(n, k)` out.
-Two wheels: CPython 3.12 limited ABI, and a free-threaded set.
-Both compile the gpulite device walk. CUDA `__dlpack__` tensors
-(`torch`) go to `lc_gpu_*` by device pointer; the result is a
-CUDA DLPack int32 `(n, k)` capsule. `lc_gpu_*` is the C waist
-for the device `Workspace`. A `v*` tag on d-SEAMS/linkcell
-publishes the two wheel kinds and the sdist to PyPI
-(trusted publisher, no Actions environment).
+dlpk: any `__dlpack__()` object in, `(indices, dist2)` out.
+`xyz` may be `(n, 3)` or `(n_frames, n, 3)`. `cell` is a DLPack
+tensor on any device. A CUDA cell is inverted on device; the host
+reads only the four launch ints. Two wheels: CPython 3.12 limited
+ABI, and a free-threaded set. Both compile the gpulite device
+walk. CUDA `__dlpack__` tensors (`torch`) go to `lc_gpu_*` by
+device pointer; the result is a pair of CUDA DLPack capsules.
+`lc_knearest_d2` and `lc_knearest_many` write squared distances
+and a frame-major batch. `lc_gpu_*` is the C waist for the device
+`Workspace`. A `v*` tag on d-SEAMS/linkcell publishes the two
+wheel kinds and the sdist to PyPI (trusted publisher, no Actions
+environment).
 
 ## 0.3.1
 
