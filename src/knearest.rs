@@ -19,6 +19,8 @@ use crate::Error;
 
 const MAX_CELLS: i64 = 16_777_216;
 
+type SearchHits = Vec<(usize, Vec<(f64, usize)>)>;
+
 fn pair_dist2(simbox: &Cell, p: [f64; 3], q: [f64; 3]) -> f64 {
     if simbox.is_ortho() {
         return simbox.dist2(p, q);
@@ -219,6 +221,7 @@ pub fn knearest_into_d2(
 
 /// Frame-major batch: `xyz` is `n_frames * n` points, `out_*` are
 /// `n_frames * n * k`. One shared cell. `mask` is length `n` or `None`.
+#[allow(clippy::too_many_arguments)]
 pub fn knearest_into_many(
     xyz: &[[f64; 3]],
     n: usize,
@@ -351,7 +354,7 @@ fn search(
     k: usize,
     mask: Option<&[bool]>,
     cell_hint: Option<f64>,
-) -> Result<Vec<(usize, Vec<(f64, usize)>)>, Error> {
+) -> Result<SearchHits, Error> {
     if k == 0 {
         return Err(Error::ZeroK);
     }
@@ -372,7 +375,7 @@ fn search(
     }
 
     let mut edge = cell_hint.unwrap_or(3.0);
-    if !(edge > 0.0) {
+    if !edge.is_finite() || edge <= 0.0 {
         edge = 3.0;
     }
     let w = simbox.widths();

@@ -39,7 +39,7 @@ pub struct lc_cell {
 }
 
 thread_local! {
-    static LAST_ERROR: RefCell<Option<CString>> = RefCell::new(None);
+    static LAST_ERROR: RefCell<Option<CString>> = const { RefCell::new(None) };
 }
 
 fn set_error(msg: &str) {
