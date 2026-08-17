@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.2
+
 Python `linkcell` module (maturin / PyO3). Arrays are DLPack via
 dlpk: any `__dlpack__()` object in, `(indices, dist2)` out.
 `xyz` may be `(n, 3)` or `(n_frames, n, 3)`. `cell` is a DLPack

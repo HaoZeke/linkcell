@@ -7,11 +7,11 @@ authors:
     given-names: Rohit
     orcid: https://orcid.org/0000-0002-2393-8056
 license: MIT
-version: 0.3.1
-date-released: "2026-08-16"
+version: 0.3.2
+date-released: "2026-08-17"
 repository-code: "https://github.com/d-SEAMS/linkcell"
 url: "https://github.com/d-SEAMS/linkcell"
 abstract: >-
   Periodic linked-cell k-nearest neighbour search for
   molecular simulations. Rust implementation, C ABI,
-  C++ typed header.
+  C++ typed header, Python module over DLPack.
