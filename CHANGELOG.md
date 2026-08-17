@@ -8,7 +8,9 @@ Two wheels: CPython 3.12 limited ABI, and a free-threaded set.
 Both compile the gpulite device walk. CUDA `__dlpack__` tensors
 (`torch`) go to `lc_gpu_*` by device pointer; the result is a
 CUDA DLPack int32 `(n, k)` capsule. `lc_gpu_*` is the C waist
-for the device `Workspace`.
+for the device `Workspace`. A `v*` tag on d-SEAMS/linkcell
+publishes the two wheel kinds and the sdist to PyPI
+(trusted publisher, no Actions environment).
 
 ## 0.3.1
 
