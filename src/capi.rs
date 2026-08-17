@@ -132,7 +132,19 @@ pub unsafe extern "C" fn lc_knearest(
 ) -> c_int {
     // SAFETY: same contract as lc_knearest_d2 with a single frame and
     // no distance buffer.
-    unsafe { lc_knearest_many(xyz, n, 1, simbox, k, mask, cell_hint, out_nn, ptr::null_mut()) }
+    unsafe {
+        lc_knearest_many(
+            xyz,
+            n,
+            1,
+            simbox,
+            k,
+            mask,
+            cell_hint,
+            out_nn,
+            ptr::null_mut(),
+        )
+    }
 }
 
 /// Like [`lc_knearest`], and write squared distances into `out_d2`.
@@ -213,8 +225,7 @@ pub unsafe extern "C" fn lc_knearest_many(
             return 1;
         }
     };
-    let pts: &[[f64; 3]] =
-        unsafe { std::slice::from_raw_parts(xyz.cast::<[f64; 3]>(), n_pts) };
+    let pts: &[[f64; 3]] = unsafe { std::slice::from_raw_parts(xyz.cast::<[f64; 3]>(), n_pts) };
     let mask_vec: Option<Vec<bool>> = if mask.is_null() {
         None
     } else {
@@ -237,17 +248,7 @@ pub unsafe extern "C" fn lc_knearest_many(
     let err = if n_frames == 1 {
         crate::knearest_into_d2(pts, &sim, k, mask_vec.as_deref(), hint, nn, d2)
     } else {
-        crate::knearest_into_many(
-            pts,
-            n,
-            n_frames,
-            &sim,
-            k,
-            mask_vec.as_deref(),
-            hint,
-            nn,
-            d2,
-        )
+        crate::knearest_into_many(pts, n, n_frames, &sim, k, mask_vec.as_deref(), hint, nn, d2)
     };
     if let Err(e) = err {
         set_error(&e.to_string());

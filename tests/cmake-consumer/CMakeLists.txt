@@ -3,7 +3,7 @@ project(linkcell-consumer LANGUAGES CXX)
 
 # Installed-prefix contract: find_package(linkcell) yields linkcell::linkcell
 # with INTERFACE_INCLUDE_DIRECTORIES and IMPORTED_LOCATION.
-find_package(linkcell 0.2 REQUIRED CONFIG)
+find_package(linkcell 0.3 REQUIRED CONFIG)
 if(NOT TARGET linkcell::linkcell)
   message(FATAL_ERROR "find_package(linkcell) did not define linkcell::linkcell")
 endif()

@@ -84,7 +84,7 @@ cmake --install build
 ```
 
 ```cmake
-find_package(linkcell 0.2 REQUIRED)
+find_package(linkcell 0.3 REQUIRED)
 target_link_libraries(app PRIVATE linkcell::linkcell)
 ```
 

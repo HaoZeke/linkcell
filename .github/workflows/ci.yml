@@ -47,13 +47,19 @@ jobs:
             ${{ runner.os }}-py-
       - name: Install Python test deps
         run: |
+          python -m venv .venv
+          . .venv/bin/activate
           python -m pip install --upgrade pip
           pip install maturin pytest numpy
           pip install torch --index-url https://download.pytorch.org/whl/cpu
       - name: maturin develop
-        run: maturin develop
+        run: |
+          . .venv/bin/activate
+          maturin develop
       - name: pytest
-        run: pytest tests/python -q
+        run: |
+          . .venv/bin/activate
+          pytest tests/python -q
 
   cargo:
     strategy:

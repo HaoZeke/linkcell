@@ -54,8 +54,7 @@ unsafe extern "C" {
     fn lc_gpu_alloc(ptr: *mut *mut c_void, bytes: usize) -> c_int;
     fn lc_gpu_free(ptr: *mut c_void);
     fn lc_gpu_fill_i32(ptr: *mut c_void, value: c_int, n: usize) -> c_int;
-    fn lc_gpu_memcpy(dst: *mut c_void, src: *const c_void, bytes: usize, kind: c_int)
-        -> c_int;
+    fn lc_gpu_memcpy(dst: *mut c_void, src: *const c_void, bytes: usize, kind: c_int) -> c_int;
 }
 
 fn gpu_err() -> PyErr {
@@ -180,7 +179,8 @@ impl StreamDlpack {
         copy: Option<Bound<'py, PyAny>>,
     ) -> PyResult<Py<PyCapsule>> {
         let _ = stream;
-        self.inner.__dlpack__(py, None, max_version, dl_device, copy)
+        self.inner
+            .__dlpack__(py, None, max_version, dl_device, copy)
     }
 
     fn __dlpack_device__<'py>(&self, py: Python<'py>) -> PyResult<Py<pyo3::types::PyTuple>> {
@@ -189,8 +189,8 @@ impl StreamDlpack {
 }
 
 fn to_stream_dlpack(py: Python<'_>, tensor: DLPackTensor) -> PyResult<Py<PyAny>> {
-    let inner = PyDLPack::try_from(tensor)
-        .map_err(|e| PyRuntimeError::new_err(format!("dlpack: {e}")))?;
+    let inner =
+        PyDLPack::try_from(tensor).map_err(|e| PyRuntimeError::new_err(format!("dlpack: {e}")))?;
     Ok(Py::new(py, StreamDlpack { inner })?.into_any())
 }
 
@@ -274,7 +274,9 @@ pub fn knearest_cuda<'py>(
     };
     let mask_ptr = if let Some(ref t) = mask_t {
         if t.device().device_type != DLDeviceType::kDLCUDA {
-            return Err(PyValueError::new_err("mask must be on the same CUDA device"));
+            return Err(PyValueError::new_err(
+                "mask must be on the same CUDA device",
+            ));
         }
         t.data_ptr::<c_int>()
             .map_err(|e| PyValueError::new_err(format!("{e}")))?

@@ -344,9 +344,7 @@ fn lc_knearest_d2_writes_periodic_image() {
 
 #[test]
 fn lc_knearest_many_two_frames() {
-    let packed = [
-        0.2, 0.0, 0.0, 9.4, 0.0, 0.0, 0.2, 0.0, 0.0, 9.4, 0.0, 0.0,
-    ];
+    let packed = [0.2, 0.0, 0.0, 9.4, 0.0, 0.0, 0.2, 0.0, 0.0, 9.4, 0.0, 0.0];
     let box_c = ortho_c(10.0, 10.0, 10.0);
     let mut nn = [-1i32; 4];
     let mut d2 = [0.0f64; 4];
