@@ -44,7 +44,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Build abi3 wheel
-        run: uvx --from cibuildwheel cibuildwheel --output-dir wheelhouse
+        run: uvx --from 'cibuildwheel>=3.2,<4' cibuildwheel --output-dir wheelhouse
         env:
           CIBW_BUILD: "cp312-*"
           CIBW_SKIP: "*musllinux* *i686* pp* cp3??t-*"
@@ -81,8 +81,9 @@ jobs:
         with:
           python-version: "3.13"
       - name: Build free-threaded wheels
-        run: uvx --from cibuildwheel cibuildwheel --output-dir wheelhouse
+        run: uvx --from 'cibuildwheel>=3.2,<4' cibuildwheel --output-dir wheelhouse
         env:
+          CIBW_ENABLE: cpython-freethreading
           CIBW_BUILD: "cp313t-* cp314t-*"
           CIBW_SKIP: "*musllinux* *i686* pp*"
           CIBW_ARCHS: ${{ matrix.arch }}
