@@ -47,7 +47,7 @@ jobs:
         run: uvx --from 'cibuildwheel>=3.2,<4' cibuildwheel --output-dir wheelhouse
         env:
           CIBW_BUILD: "cp312-*"
-          CIBW_SKIP: "*musllinux* *i686* pp* cp3??t-*"
+          CIBW_SKIP: "*musllinux* *i686* cp3??t-*"
           CIBW_ARCHS: ${{ matrix.arch }}
           CIBW_ENVIRONMENT: MATURIN_PEP517_ARGS="--features abi3"
           CIBW_TEST_REQUIRES: pytest numpy
@@ -83,9 +83,8 @@ jobs:
       - name: Build free-threaded wheels
         run: uvx --from 'cibuildwheel>=3.2,<4' cibuildwheel --output-dir wheelhouse
         env:
-          CIBW_ENABLE: cpython-freethreading
-          CIBW_BUILD: "cp313t-* cp314t-*"
-          CIBW_SKIP: "*musllinux* *i686* pp*"
+          CIBW_BUILD: "cp314t-*"
+          CIBW_SKIP: "*musllinux* *i686*"
           CIBW_ARCHS: ${{ matrix.arch }}
           CIBW_TEST_REQUIRES: pytest numpy
           CIBW_TEST_COMMAND: pytest {project}/tests/python -q

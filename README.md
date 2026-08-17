@@ -35,7 +35,7 @@ object (numpy, torch, jax, cupy) is a valid `xyz` / `cell`, on any
 device. A CUDA `xyz` stays on device; a CUDA `cell` is inverted on
 device. `torch.from_dlpack` consumes `(indices, dist2)`.
 Wheels: one CPython 3.12 limited-ABI (`abi3`) artifact per platform, and
-one free-threaded set (`cp313t` / `cp314t`).
+one free-threaded set (`cp314t`; PyO3 0.29 needs 3.14+ for `t`).
 
 ```
 pip install linkcell

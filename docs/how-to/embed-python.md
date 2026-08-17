@@ -39,5 +39,6 @@ device; the host only reads the four launch ints (`nx`, `ny`,
 Wheels:
 
 - limited ABI: one `abi3` wheel per platform, CPython 3.12+
-- free-threaded set: `cp313t` and `cp314t` (no stable ABI on `t`
-  until PyO3 `abi3t` / CPython 3.15)
+- free-threaded set: `cp314t` (PyO3 0.29 does not wrap
+  free-threaded 3.13; no stable ABI on `t` until PyO3 `abi3t` /
+  CPython 3.15)
