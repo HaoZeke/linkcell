@@ -71,10 +71,128 @@ __device__ inline void mulCols(const double* __restrict__ M, double s0,
   z = M[2] * s0 + M[5] * s1 + M[8] * s2;
 }
 
+extern "C" __global__ void invert_cell(
+    const double* __restrict__ cell, int cell_n, int nFrames,
+    double* __restrict__ H, double* __restrict__ Hinv,
+    double* __restrict__ origin, double* __restrict__ cmin,
+    double cell_hint, int* __restrict__ plan) {
+  if (blockIdx.x != 0 || threadIdx.x != 0) return;
+  double ax, ay, az, bx, by, bz, cx, cy, cz, ox, oy, oz;
+  ox = 0.0;
+  oy = 0.0;
+  oz = 0.0;
+  if (cell_n == 3) {
+    ax = cell[0];
+    ay = 0.0;
+    az = 0.0;
+    bx = 0.0;
+    by = cell[1];
+    bz = 0.0;
+    cx = 0.0;
+    cy = 0.0;
+    cz = cell[2];
+  } else if (cell_n == 9 || cell_n == 12) {
+    ax = cell[0];
+    ay = cell[1];
+    az = cell[2];
+    bx = cell[3];
+    by = cell[4];
+    bz = cell[5];
+    cx = cell[6];
+    cy = cell[7];
+    cz = cell[8];
+    if (cell_n == 12) {
+      ox = cell[9];
+      oy = cell[10];
+      oz = cell[11];
+    }
+  } else {
+    plan[4] = 0;
+    return;
+  }
+  const double det = ax * (by * cz - bz * cy) - ay * (bx * cz - bz * cx) +
+                     az * (bx * cy - by * cx);
+  if (!(det == det) || fabs(det) < 1.0e-18) {
+    plan[4] = 0;
+    return;
+  }
+  const double invdet = 1.0 / det;
+  double H0[9], Hi[9];
+  H0[0] = ax;
+  H0[1] = ay;
+  H0[2] = az;
+  H0[3] = bx;
+  H0[4] = by;
+  H0[5] = bz;
+  H0[6] = cx;
+  H0[7] = cy;
+  H0[8] = cz;
+  Hi[0] = (by * cz - bz * cy) * invdet;
+  Hi[1] = (az * cy - ay * cz) * invdet;
+  Hi[2] = (ay * bz - az * by) * invdet;
+  Hi[3] = (bz * cx - bx * cz) * invdet;
+  Hi[4] = (ax * cz - az * cx) * invdet;
+  Hi[5] = (az * bx - ax * bz) * invdet;
+  Hi[6] = (bx * cy - by * cx) * invdet;
+  Hi[7] = (ay * cx - ax * cy) * invdet;
+  Hi[8] = (ax * by - ay * bx) * invdet;
+  const double bcx = by * cz - bz * cy;
+  const double bcy = bz * cx - bx * cz;
+  const double bcz = bx * cy - by * cx;
+  const double cax = cy * az - cz * ay;
+  const double cay = cz * ax - cx * az;
+  const double caz = cx * ay - cy * ax;
+  const double abx = ay * bz - az * by;
+  const double aby = az * bx - ax * bz;
+  const double abz = ax * by - ay * bx;
+  const double adet = fabs(det);
+  const double w0 = adet / sqrt(bcx * bcx + bcy * bcy + bcz * bcz);
+  const double w1 = adet / sqrt(cax * cax + cay * cay + caz * caz);
+  const double w2 = adet / sqrt(abx * abx + aby * aby + abz * abz);
+  if (!(w0 > 0.0 && w1 > 0.0 && w2 > 0.0)) {
+    plan[4] = 0;
+    return;
+  }
+  double edge = cell_hint;
+  if (!(edge > 0.0)) edge = 3.0;
+  double wmin = w0;
+  if (w1 < wmin) wmin = w1;
+  if (w2 < wmin) wmin = w2;
+  if (edge > wmin) edge = wmin;
+  int nx = (int)floor(w0 / edge);
+  int ny = (int)floor(w1 / edge);
+  int nz = (int)floor(w2 / edge);
+  if (nx < 1) nx = 1;
+  if (ny < 1) ny = 1;
+  if (nz < 1) nz = 1;
+  const int nC = nx * ny * nz;
+  if (nC <= 0 || nC > 262144) {
+    plan[4] = 2;
+    return;
+  }
+  const double cellMin =
+      fmin(w0 / (double)nx, fmin(w1 / (double)ny, w2 / (double)nz));
+  origin[0] = ox;
+  origin[1] = oy;
+  origin[2] = oz;
+  for (int f = 0; f < nFrames; ++f) {
+    for (int i = 0; i < 9; ++i) {
+      H[f * 9 + i] = H0[i];
+      Hinv[f * 9 + i] = Hi[i];
+    }
+    cmin[f] = cellMin;
+  }
+  plan[0] = nx;
+  plan[1] = ny;
+  plan[2] = nz;
+  plan[3] = nC;
+  plan[4] = 1;
+}
+
 extern "C" __global__ void bin_atoms(const double* __restrict__ xyz,
     const int* __restrict__ mask, int n, int nFrames,
     const double* __restrict__ H, const double* __restrict__ Hinv,
-    double ox, double oy, double oz, int nx, int ny, int nz,
+    const double* __restrict__ origin, int nx, int ny, int nz,
     int nC, int* __restrict__ cellOf, int* __restrict__ cellCount,
     double* __restrict__ folded) {
   const int tid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -91,6 +209,9 @@ extern "C" __global__ void bin_atoms(const double* __restrict__ xyz,
   }
   const double* Hf = H + f * 9;
   const double* Hi = Hinv + f * 9;
+  const double ox = origin[0];
+  const double oy = origin[1];
+  const double oz = origin[2];
   const double dx = xyz[id * 3 + 0] - ox;
   const double dy = xyz[id * 3 + 1] - oy;
   const double dz = xyz[id * 3 + 2] - oz;
@@ -185,7 +306,8 @@ extern "C" __global__ void knearest_shells(const double* __restrict__ sorted,
     const int* __restrict__ sdz, const int* __restrict__ reachOff,
     int n, int nFrames, int nC, int nx, int ny, int nz,
     const double* __restrict__ H, const double* __restrict__ cellMin,
-    int k, int maxReach, int tpp, int* __restrict__ out) {
+    int k, int maxReach, int tpp, int* __restrict__ out,
+    double* __restrict__ out_d2) {
   const int lane = threadIdx.x % tpp;
   const int gid = (blockIdx.x * blockDim.x + threadIdx.x) / tpp;
   const int active = gid < n * nFrames;
@@ -194,7 +316,10 @@ extern "C" __global__ void knearest_shells(const double* __restrict__ sorted,
   const int id = f * n + i;
   const int cid = active ? cellOf[id] : -1;
   if (active && lane == 0) {
-    for (int t = 0; t < k; ++t) out[id * k + t] = -1;
+    for (int t = 0; t < k; ++t) {
+      out[id * k + t] = -1;
+      if (out_d2) out_d2[id * k + t] = 0.0 / 0.0;
+    }
   }
   const int nxy = nx * ny;
   const int iz = cid >= 0 ? cid / nxy : 0;
@@ -309,7 +434,10 @@ extern "C" __global__ void knearest_shells(const double* __restrict__ sorted,
     bestR2[p] = key;
     bestJ[p] = idj;
   }
-  for (int t = 0; t < found; ++t) out[id * k + t] = bestJ[t];
+  for (int t = 0; t < found; ++t) {
+    out[id * k + t] = bestJ[t];
+    if (out_d2) out_d2[id * k + t] = bestR2[t];
+  }
 }
 
 extern "C" __global__ void zero_i32(int* p, int n) {
@@ -449,7 +577,7 @@ struct Workspace::Impl {
   cudaStream_t stream = nullptr;
   DevPtr dcellOf, dcellCount, dcellOff, dorder, dfolded, dsorted, dhome;
   DevPtr dsdx, dsdy, dsdz, dreachOff;
-  DevPtr dH, dHinv, dcmin;
+  DevPtr dH, dHinv, dcmin, dorigin, dplan;
   std::vector<int> hsdx, hsdy, hsdz, hsoff;
   std::vector<double> hH, hHinv, hCmin;
 
@@ -502,6 +630,12 @@ struct Workspace::Impl {
     growOne(dH, n9, "H");
     growOne(dHinv, n9, "Hinv");
     growOne(dcmin, n1, "cmin");
+    if (dorigin.p == nullptr) {
+      growOne(dorigin, 3 * sizeof(double), "origin");
+    }
+    if (dplan.p == nullptr) {
+      growOne(dplan, 5 * sizeof(int), "plan");
+    }
   }
 
   void ensureStencil(int maxReach) {
@@ -562,15 +696,18 @@ void Workspace::wait() { impl_->sync(); }
 
 void Workspace::knearest_into(const double *xyz, std::size_t n, const Cell &cell,
                               std::size_t k, int *out, std::size_t out_len,
-                              const int *mask, double cell_hint) {
-  knearest_into_many(xyz, n, 1, cell, k, out, out_len, mask, cell_hint, true);
+                              const int *mask, double cell_hint,
+                              double *out_d2) {
+  knearest_into_many(xyz, n, 1, cell, k, out, out_len, mask, cell_hint, true,
+                     nullptr, out_d2);
 }
 
 void Workspace::knearest_into_many(const double *xyz, std::size_t n,
                                    std::size_t nFrames, const Cell &cell,
                                    std::size_t k, int *out, std::size_t out_len,
                                    const int *mask, double cell_hint,
-                                   bool wait, const double *frameBox) {
+                                   bool wait, const double *frameBox,
+                                   double *out_d2) {
   if (!available()) {
     throw Error("CUDA driver or nvrtc not loaded");
   }
@@ -623,17 +760,9 @@ void Workspace::knearest_into_many(const double *xyz, std::size_t n,
       std::min(widths[1] / static_cast<double>(ny),
                widths[2] / static_cast<double>(nz)));
   const int maxReach = std::max(nx, std::max(ny, nz)) / 2 + 1;
-  int nI = static_cast<int>(n);
-  int nF = static_cast<int>(nFrames);
-  int kI = static_cast<int>(k);
-  const int nTot = nI * nF;
-  const int nCtot = nC * nF;
-  const int nOff = (nC + 1) * nF;
-
-  impl_->ensure(nTot, nCtot, nOff);
-  impl_->ensureStencil(maxReach);
   impl_->ensureStream();
   auto &rt = CUDART::instance();
+  const int nF = static_cast<int>(nFrames);
   const std::size_t fSz = static_cast<std::size_t>(nF);
   impl_->ensureBox(nF);
   impl_->hH.assign(fSz * 9, 0.0);
@@ -678,6 +807,89 @@ void Workspace::knearest_into_many(const double *xyz, std::size_t n,
                                fSz * sizeof(double), cudaMemcpyHostToDevice,
                                impl_->stream),
             "HtoD cmin");
+  const double origin_h[3] = {cell.origin[0], cell.origin[1], cell.origin[2]};
+  checkCuda(rt.cudaMemcpyAsync(impl_->dorigin.p, origin_h, 3 * sizeof(double),
+                               cudaMemcpyHostToDevice, impl_->stream),
+            "HtoD origin");
+  launchWalk(xyz, n, nFrames, k, out, mask, wait, out_d2, nx, ny, nz, nC,
+             maxReach);
+}
+
+void Workspace::knearest_into_many_dcell(
+    const double *xyz, std::size_t n, std::size_t nFrames, const double *cell,
+    int cell_n, std::size_t k, int *out, std::size_t out_len, const int *mask,
+    double cell_hint, bool wait, double *out_d2) {
+  if (!available()) {
+    throw Error("CUDA driver or nvrtc not loaded");
+  }
+  if (n == 0 || nFrames == 0) {
+    throw Error("no points");
+  }
+  if (k == 0) {
+    throw Error("k must be at least 1");
+  }
+  if (k > static_cast<std::size_t>(kMaxK)) {
+    throw Error("device k-nearest supports k <= 16");
+  }
+  if (out_len != n * k * nFrames) {
+    throw Error("out buffer length must be nFrames * n * k");
+  }
+  if (xyz == nullptr || out == nullptr || cell == nullptr) {
+    throw Error("null pointer");
+  }
+  if (cell_n != 3 && cell_n != 9 && cell_n != 12) {
+    throw Error("device cell must have 3, 9, or 12 doubles");
+  }
+  impl_->ensureStream();
+  impl_->ensureBox(static_cast<int>(nFrames));
+  auto &rt = CUDART::instance();
+  auto &factory = KernelFactory::instance(0);
+  const std::vector<std::string> opt{"-std=c++17"};
+  auto *kInv = factory.create("invert_cell", kKernels, "linkcell.cu", opt);
+  int nF = static_cast<int>(nFrames);
+  int cellN = cell_n;
+  void *cellP = const_cast<double *>(cell);
+  double hint = cell_hint;
+  {
+    void *raw[] = {&cellP,          &cellN,         &nF,
+                   &impl_->dH.p,    &impl_->dHinv.p, &impl_->dorigin.p,
+                   &impl_->dcmin.p, &hint,           &impl_->dplan.p};
+    std::vector<void *> a(raw, raw + sizeof(raw) / sizeof(raw[0]));
+    kInv->launch(dim3(1), dim3(1), 0, impl_->stream, a, false);
+  }
+  int plan[5] = {0, 0, 0, 0, 0};
+  checkCuda(rt.cudaMemcpyAsync(plan, impl_->dplan.p, 5 * sizeof(int),
+                               cudaMemcpyDeviceToHost, impl_->stream),
+            "DtoH plan");
+  impl_->sync();
+  if (plan[4] == 0) {
+    throw Error("bad cell");
+  }
+  if (plan[4] != 1) {
+    throw Error("too many cells");
+  }
+  const int nx = plan[0];
+  const int ny = plan[1];
+  const int nz = plan[2];
+  const int nC = plan[3];
+  const int maxReach = std::max(nx, std::max(ny, nz)) / 2 + 1;
+  launchWalk(xyz, n, nFrames, k, out, mask, wait, out_d2, nx, ny, nz, nC,
+             maxReach);
+}
+
+void Workspace::launchWalk(const double *xyz, std::size_t n,
+                           std::size_t nFrames, std::size_t k, int *out,
+                           const int *mask, bool wait, double *out_d2, int nx,
+                           int ny, int nz, int nC, int maxReach) {
+  int nI = static_cast<int>(n);
+  int nF = static_cast<int>(nFrames);
+  int kI = static_cast<int>(k);
+  const int nTot = nI * nF;
+  const int nCtot = nC * nF;
+  const int nOff = (nC + 1) * nF;
+  impl_->ensure(nTot, nCtot, nOff);
+  impl_->ensureStencil(maxReach);
+  impl_->ensureStream();
 
   auto &factory = KernelFactory::instance(0);
   const std::vector<std::string> opt{"-std=c++17"};
@@ -752,11 +964,9 @@ void Workspace::knearest_into_many(const double *xyz, std::size_t n,
   void *xyzP = const_cast<double *>(xyz);
   void *maskV = const_cast<int *>(mask);
   void *outP = out;
+  void *outD2 = out_d2;
   int nCv = nC;
   int maxR = maxReach;
-  double ox = cell.origin[0];
-  double oy = cell.origin[1];
-  double oz = cell.origin[2];
   auto launchArgs = [](void **raw, std::size_t n) {
     return std::vector<void *>(raw, raw + n);
   };
@@ -774,9 +984,7 @@ void Workspace::knearest_into_many(const double *xyz, std::size_t n,
                    &nF,
                    &impl_->dH.p,
                    &impl_->dHinv.p,
-                   &ox,
-                   &oy,
-                   &oz,
+                   &impl_->dorigin.p,
                    &nx,
                    &ny,
                    &nz,
@@ -808,7 +1016,8 @@ void Workspace::knearest_into_many(const double *xyz, std::size_t n,
                    &nI,                 &nF,               &nCv,
                    &nx,                 &ny,               &nz,
                    &impl_->dH.p,        &impl_->dcmin.p,   &kI,
-                   &maxR,               &tpp,              &outP};
+                   &maxR,               &tpp,              &outP,
+                   &outD2};
     auto a = launchArgs(raw, sizeof(raw) / sizeof(raw[0]));
     kNear->launch(dim3(tppGrid), dim3(block), sh, impl_->stream, a, false);
   }

@@ -64,15 +64,15 @@ static linkcell::Cell cell_from_c(const lc_cell *simbox) {
 
 int lc_gpu_knearest(lc_gpu_workspace *ws, const double *xyz, size_t n,
                     const struct lc_cell *simbox, size_t k, const int *mask,
-                    double cell_hint, int *out_nn) {
+                    double cell_hint, int *out_nn, double *out_d2) {
   return lc_gpu_knearest_many(ws, xyz, n, 1, simbox, k, mask, cell_hint,
-                              out_nn, 1);
+                              out_nn, out_d2, 1);
 }
 
 int lc_gpu_knearest_many(lc_gpu_workspace *ws, const double *xyz, size_t n,
                          size_t n_frames, const struct lc_cell *simbox,
                          size_t k, const int *mask, double cell_hint,
-                         int *out_nn, int wait) {
+                         int *out_nn, double *out_d2, int wait) {
 #if defined(LINKCELL_HAS_GPULITE)
   if (ws == nullptr || xyz == nullptr || simbox == nullptr ||
       out_nn == nullptr) {
@@ -83,7 +83,7 @@ int lc_gpu_knearest_many(lc_gpu_workspace *ws, const double *xyz, size_t n,
     auto cell = cell_from_c(simbox);
     const size_t out_len = n * k * n_frames;
     ws->ws.knearest_into_many(xyz, n, n_frames, cell, k, out_nn, out_len, mask,
-                              cell_hint, wait != 0, nullptr);
+                              cell_hint, wait != 0, nullptr, out_d2);
     set_err(nullptr);
     return 0;
   } catch (const std::exception &e) {
@@ -100,6 +100,47 @@ int lc_gpu_knearest_many(lc_gpu_workspace *ws, const double *xyz, size_t n,
   (void)mask;
   (void)cell_hint;
   (void)out_nn;
+  (void)out_d2;
+  (void)wait;
+  set_err("built without gpulite");
+  return 1;
+#endif
+}
+
+int lc_gpu_knearest_many_dcell(lc_gpu_workspace *ws, const double *xyz,
+                               size_t n, size_t n_frames, const double *cell,
+                               int cell_n, size_t k, const int *mask,
+                               double cell_hint, int *out_nn, double *out_d2,
+                               int wait) {
+#if defined(LINKCELL_HAS_GPULITE)
+  if (ws == nullptr || xyz == nullptr || cell == nullptr ||
+      out_nn == nullptr) {
+    set_err("null pointer");
+    return 1;
+  }
+  try {
+    const size_t out_len = n * k * n_frames;
+    ws->ws.knearest_into_many_dcell(xyz, n, n_frames, cell, cell_n, k, out_nn,
+                                    out_len, mask, cell_hint, wait != 0,
+                                    out_d2);
+    set_err(nullptr);
+    return 0;
+  } catch (const std::exception &e) {
+    set_err(e.what());
+    return 1;
+  }
+#else
+  (void)ws;
+  (void)xyz;
+  (void)n;
+  (void)n_frames;
+  (void)cell;
+  (void)cell_n;
+  (void)k;
+  (void)mask;
+  (void)cell_hint;
+  (void)out_nn;
+  (void)out_d2;
   (void)wait;
   set_err("built without gpulite");
   return 1;
@@ -163,6 +204,43 @@ void lc_gpu_free(void *ptr) {
   }
 #else
   (void)ptr;
+#endif
+}
+
+int lc_gpu_memcpy(void *dst, const void *src, size_t bytes, int kind) {
+#if defined(LINKCELL_HAS_GPULITE)
+  if (bytes == 0) {
+    set_err(nullptr);
+    return 0;
+  }
+  if (dst == nullptr || src == nullptr) {
+    set_err("null pointer");
+    return 1;
+  }
+  if (!linkcell::gpu::available()) {
+    set_err("CUDA driver or nvrtc not loaded");
+    return 1;
+  }
+  try {
+    auto &rt = gpulite::CUDART::instance();
+    auto st = rt.cudaMemcpy(dst, src, bytes, static_cast<cudaMemcpyKind>(kind));
+    if (st != cudaSuccess) {
+      set_err(rt.cudaGetErrorString(st));
+      return 1;
+    }
+    set_err(nullptr);
+    return 0;
+  } catch (const std::exception &e) {
+    set_err(e.what());
+    return 1;
+  }
+#else
+  (void)dst;
+  (void)src;
+  (void)bytes;
+  (void)kind;
+  set_err("built without gpulite");
+  return 1;
 #endif
 }
 
