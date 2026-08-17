@@ -31,6 +31,27 @@ extern "C" {
         cell_hint: f64,
         out_nn: *mut c_int,
     ) -> c_int;
+    fn lc_knearest_d2(
+        xyz: *const f64,
+        n: usize,
+        simbox: *const LcCell,
+        k: usize,
+        mask: *const c_int,
+        cell_hint: f64,
+        out_nn: *mut c_int,
+        out_d2: *mut f64,
+    ) -> c_int;
+    fn lc_knearest_many(
+        xyz: *const f64,
+        n: usize,
+        n_frames: usize,
+        simbox: *const LcCell,
+        k: usize,
+        mask: *const c_int,
+        cell_hint: f64,
+        out_nn: *mut c_int,
+        out_d2: *mut f64,
+    ) -> c_int;
 }
 
 fn ortho_c(lx: f64, ly: f64, lz: f64) -> LcCell {
@@ -296,4 +317,53 @@ fn c_abi_overflow_is_not_empty() {
     assert_eq!(msg.to_str().unwrap(), "n * k overflows");
     assert_ne!(msg.to_str().unwrap(), "no points");
     assert_ne!(msg.to_str().unwrap(), "out buffer length must be n * k");
+}
+
+#[test]
+fn lc_knearest_d2_writes_periodic_image() {
+    let packed = [0.2, 0.0, 0.0, 9.4, 0.0, 0.0];
+    let box_c = ortho_c(10.0, 10.0, 10.0);
+    let mut nn = [-1i32; 2];
+    let mut d2 = [0.0f64; 2];
+    let rc = unsafe {
+        lc_knearest_d2(
+            packed.as_ptr(),
+            2,
+            &box_c,
+            1,
+            std::ptr::null(),
+            0.0,
+            nn.as_mut_ptr(),
+            d2.as_mut_ptr(),
+        )
+    };
+    assert_eq!(rc, 0);
+    assert_eq!(nn, [1, 0]);
+    assert!((d2[0] - 0.64).abs() < 1e-12);
+}
+
+#[test]
+fn lc_knearest_many_two_frames() {
+    let packed = [
+        0.2, 0.0, 0.0, 9.4, 0.0, 0.0, 0.2, 0.0, 0.0, 9.4, 0.0, 0.0,
+    ];
+    let box_c = ortho_c(10.0, 10.0, 10.0);
+    let mut nn = [-1i32; 4];
+    let mut d2 = [0.0f64; 4];
+    let rc = unsafe {
+        lc_knearest_many(
+            packed.as_ptr(),
+            2,
+            2,
+            &box_c,
+            1,
+            std::ptr::null(),
+            0.0,
+            nn.as_mut_ptr(),
+            d2.as_mut_ptr(),
+        )
+    };
+    assert_eq!(rc, 0);
+    assert_eq!(nn, [1, 0, 1, 0]);
+    assert!((d2[3] - 0.64).abs() < 1e-12);
 }

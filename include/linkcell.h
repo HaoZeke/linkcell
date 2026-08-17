@@ -5,6 +5,8 @@
  *
  * Memory ownership
  *   - lc_knearest writes into caller-owned out_nn (length n * k).
+ *   - lc_knearest_d2 also writes out_d2 (length n * k, unused NaN).
+ *   - lc_knearest_many is the frame-major batch (n_frames * n * k).
  *   - lc_last_error returns a thread-local pointer. Do not free. The
  *     pointer is invalid after the next lc_knearest on the same thread.
  *     lc_version does not read or write the slot.
@@ -126,6 +128,36 @@ int lc_knearest(const double *xyz,
                 const int *mask,
                 double cell_hint,
                 int *out_nn);
+
+/**
+ * Like [`lc_knearest`], and write squared distances into `out_d2`.
+ *
+ * `out_d2` is caller-owned, length `n * k`. Unused slots are `NaN`.
+ * `out_d2` may be `NULL` to skip distances (same as [`lc_knearest`]).
+ */
+int lc_knearest_d2(const double *xyz,
+                   size_t n,
+                   const struct lc_cell *simbox,
+                   size_t k,
+                   const int *mask,
+                   double cell_hint,
+                   int *out_nn,
+                   double *out_d2);
+
+/**
+ * Frame-major batch. `xyz` is `n_frames * n` packed triples.
+ * `out_nn` / `out_d2` are `n_frames * n * k`. One shared cell.
+ * `mask` is length `n` or `NULL`. `out_d2` may be `NULL`.
+ */
+int lc_knearest_many(const double *xyz,
+                     size_t n,
+                     size_t n_frames,
+                     const struct lc_cell *simbox,
+                     size_t k,
+                     const int *mask,
+                     double cell_hint,
+                     int *out_nn,
+                     double *out_d2);
 
 /**
  * Thread-local last-error string from this thread's most recent

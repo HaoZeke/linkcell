@@ -98,8 +98,9 @@
 //! # }
 //! ```
 //!
-//! The C ABI (`lc_*`) is the hourglass waist (packed `n * k` indices).
-//! C++ lives in `include/linkcell.hpp` as a RAII header over that ABI.
+//! The C ABI (`lc_*`) is the hourglass waist: packed `n * k` indices
+//! and matching squared distances. C++ lives in `include/linkcell.hpp`
+//! as a RAII header over that ABI.
 
 #![deny(missing_docs)]
 
@@ -109,7 +110,9 @@ mod knearest;
 
 pub use cell::Cell;
 pub use error::Error;
-pub use knearest::{knearest, knearest_brute, knearest_into, Neighbors};
+pub use knearest::{
+    knearest, knearest_brute, knearest_into, knearest_into_d2, knearest_into_many, Neighbors,
+};
 
 #[cfg(feature = "capi")]
 mod capi;

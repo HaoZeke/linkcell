@@ -8,7 +8,8 @@
 //! lattice images of the same source.
 //!
 //! [`knearest`] returns one [`Neighbors`] row per point. [`knearest_into`]
-//! writes a packed `n * k` index buffer (`-1` unused). Sources run under
+//! writes packed `n * k` indices (`-1` unused). [`knearest_into_d2`]
+//! also writes the matching squared distances (`NaN` unused). Sources run under
 //! rayon when the `parallel` feature is on (the default); build with
 //! `--no-default-features` to serialize. The per-source `KHeap` stays on
 //! the stack for `k <= 16`.
@@ -197,11 +198,106 @@ pub fn knearest_into(
     if n.checked_mul(k) != Some(out.len()) {
         return Err(Error::BufferSize);
     }
-    out.fill(-1);
+    knearest_into_d2(xyz, simbox, k, mask, cell_hint, out, None)
+}
+
+/// Write k-nearest indices and squared distances, nearest first.
+///
+/// `out_nn` has length `n * k`. Unused index slots are `-1`.
+/// `out_d2`, when `Some`, has the same length; unused slots are `NaN`.
+pub fn knearest_into_d2(
+    xyz: &[[f64; 3]],
+    simbox: &Cell,
+    k: usize,
+    mask: Option<&[bool]>,
+    cell_hint: Option<f64>,
+    out_nn: &mut [i32],
+    out_d2: Option<&mut [f64]>,
+) -> Result<(), Error> {
+    write_one(xyz, simbox, k, mask, cell_hint, out_nn, out_d2)
+}
+
+/// Frame-major batch: `xyz` is `n_frames * n` points, `out_*` are
+/// `n_frames * n * k`. One shared cell. `mask` is length `n` or `None`.
+pub fn knearest_into_many(
+    xyz: &[[f64; 3]],
+    n: usize,
+    n_frames: usize,
+    simbox: &Cell,
+    k: usize,
+    mask: Option<&[bool]>,
+    cell_hint: Option<f64>,
+    out_nn: &mut [i32],
+    out_d2: Option<&mut [f64]>,
+) -> Result<(), Error> {
+    if n_frames == 0 {
+        return Err(Error::Empty);
+    }
+    let Some(n_pts) = n.checked_mul(n_frames) else {
+        return Err(Error::Overflow);
+    };
+    if xyz.len() != n_pts {
+        return Err(Error::BufferSize);
+    }
+    let Some(need) = n_pts.checked_mul(k) else {
+        return Err(Error::Overflow);
+    };
+    if out_nn.len() != need {
+        return Err(Error::BufferSize);
+    }
+    if let Some(d2) = out_d2.as_ref() {
+        if d2.len() != need {
+            return Err(Error::BufferSize);
+        }
+    }
+    for f in 0..n_frames {
+        let lo = f * n;
+        let hi = lo + n;
+        let nn_lo = f * n * k;
+        let nn_hi = nn_lo + n * k;
+        let frame_d2 = out_d2.as_mut().map(|d| &mut d[nn_lo..nn_hi]);
+        write_one(
+            &xyz[lo..hi],
+            simbox,
+            k,
+            mask,
+            cell_hint,
+            &mut out_nn[nn_lo..nn_hi],
+            frame_d2,
+        )?;
+    }
+    Ok(())
+}
+
+fn write_one(
+    xyz: &[[f64; 3]],
+    simbox: &Cell,
+    k: usize,
+    mask: Option<&[bool]>,
+    cell_hint: Option<f64>,
+    out_nn: &mut [i32],
+    mut out_d2: Option<&mut [f64]>,
+) -> Result<(), Error> {
+    let n = xyz.len();
+    if n.checked_mul(k) != Some(out_nn.len()) {
+        return Err(Error::BufferSize);
+    }
+    if let Some(d2) = out_d2.as_ref() {
+        if d2.len() != out_nn.len() {
+            return Err(Error::BufferSize);
+        }
+    }
+    out_nn.fill(-1);
+    if let Some(d2) = out_d2.as_mut() {
+        d2.fill(f64::NAN);
+    }
     let rows = search(xyz, simbox, k, mask, cell_hint)?;
     for (i, pairs) in rows {
-        for (t, &(_, j)) in pairs.iter().enumerate() {
-            out[i * k + t] = j as i32;
+        for (t, &(d2, j)) in pairs.iter().enumerate() {
+            out_nn[i * k + t] = j as i32;
+            if let Some(buf) = out_d2.as_mut() {
+                buf[i * k + t] = d2;
+            }
         }
     }
     Ok(())

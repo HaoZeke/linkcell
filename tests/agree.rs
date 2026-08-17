@@ -1,4 +1,7 @@
-use linkcell::{knearest, knearest_brute, knearest_into, Cell, Error, Neighbors};
+use linkcell::{
+    knearest, knearest_brute, knearest_into, knearest_into_d2, knearest_into_many, Cell, Error,
+    Neighbors,
+};
 
 fn almost(a: f64, b: f64) -> bool {
     (a - b).abs() <= 1e-12 * (1.0 + a.abs().max(b.abs()))
@@ -512,6 +515,35 @@ fn packed_layout_is_row_major() {
     let mut out = [0; 4];
     knearest_into(&xyz, &b, 2, None, None, &mut out).unwrap();
     assert_eq!(out, [1, -1, 0, -1]);
+}
+
+#[test]
+fn into_d2_writes_periodic_image() {
+    let b = Cell::ortho(10.0, 10.0, 10.0).unwrap();
+    let xyz = [[0.2, 0.0, 0.0], [9.4, 0.0, 0.0]];
+    let mut nn = [-1; 2];
+    let mut d2 = [0.0; 2];
+    knearest_into_d2(&xyz, &b, 1, None, None, &mut nn, Some(&mut d2)).unwrap();
+    assert_eq!(nn, [1, 0]);
+    assert!(almost(d2[0], 0.64));
+    assert!(almost(d2[1], 0.64));
+}
+
+#[test]
+fn into_many_shares_one_cell() {
+    let b = Cell::ortho(10.0, 10.0, 10.0).unwrap();
+    let xyz = [
+        [0.2, 0.0, 0.0],
+        [9.4, 0.0, 0.0],
+        [0.2, 0.0, 0.0],
+        [9.4, 0.0, 0.0],
+    ];
+    let mut nn = [-1; 4];
+    let mut d2 = [0.0; 4];
+    knearest_into_many(&xyz, 2, 2, &b, 1, None, None, &mut nn, Some(&mut d2)).unwrap();
+    assert_eq!(nn, [1, 0, 1, 0]);
+    assert!(almost(d2[0], 0.64));
+    assert!(almost(d2[3], 0.64));
 }
 
 #[test]

@@ -89,11 +89,17 @@ public:
   Neighbours() = default;
 
   Neighbours(std::vector<int> idx, std::size_t n, std::size_t k)
-      : idx_(std::move(idx)), n_(n), k_(k) {
+      : Neighbours(std::move(idx),
+                   std::vector<double>(n * k, std::numeric_limits<double>::quiet_NaN()),
+                   n, k) {}
+
+  Neighbours(std::vector<int> idx, std::vector<double> d2, std::size_t n,
+             std::size_t k)
+      : idx_(std::move(idx)), d2_(std::move(d2)), n_(n), k_(k) {
     if (k != 0 && n > std::numeric_limits<std::size_t>::max() / k) {
       throw Error("n * k overflows");
     }
-    if (idx_.size() != n * k) {
+    if (idx_.size() != n * k || d2_.size() != n * k) {
       throw Error("out buffer length must be n * k");
     }
   }
@@ -106,15 +112,25 @@ public:
     return idx_[i * k_ + j];
   }
 
+  /// Squared distance of neighbour (i, j). Unused slots are NaN.
+  [[nodiscard]] double dist2(std::size_t i, std::size_t j) const {
+    if (i >= n_ || j >= k_) {
+      throw std::out_of_range("linkcell: neighbour index out of range");
+    }
+    return d2_[i * k_ + j];
+  }
+
   [[nodiscard]] std::size_t n() const noexcept { return n_; }
   [[nodiscard]] std::size_t k() const noexcept { return k_; }
   [[nodiscard]] std::size_t size() const noexcept { return n_ * k_; }
   [[nodiscard]] const int *data() const noexcept { return idx_.data(); }
+  [[nodiscard]] const double *distances() const noexcept { return d2_.data(); }
   [[nodiscard]] const int *begin() const noexcept { return idx_.data(); }
   [[nodiscard]] const int *end() const noexcept { return idx_.data() + size(); }
 
 private:
   std::vector<int> idx_;
+  std::vector<double> d2_;
   std::size_t n_ = 0;
   std::size_t k_ = 0;
 };
@@ -142,9 +158,9 @@ inline lc_count to_c_count(std::size_t v, const char *what) {
 }
 
 inline void call_c(const double *xyz, std::size_t n, const Cell &cell,
-                   std::size_t k, int *out, const int *mask,
-                   double cell_hint) {
-  if (n == 0) {
+                   std::size_t k, int *out, const int *mask, double cell_hint,
+                   double *out_d2 = nullptr, std::size_t n_frames = 1) {
+  if (n == 0 || n_frames == 0) {
     throw Error("no points");
   }
   if (k == 0) {
@@ -154,9 +170,9 @@ inline void call_c(const double *xyz, std::size_t n, const Cell &cell,
     throw Error("null pointer");
   }
   const lc_cell raw = cell.raw();
-  const int status =
-      lc_knearest(xyz, to_c_count(n, "n"), &raw, to_c_count(k, "k"), mask,
-                  cell_hint, out);
+  const int status = lc_knearest_many(
+      xyz, to_c_count(n, "n"), to_c_count(n_frames, "n_frames"), &raw,
+      to_c_count(k, "k"), mask, cell_hint, out, out_d2);
   if (status != 0) {
     const char *msg = lc_last_error();
     throw Error(status, msg ? std::string(msg)
@@ -170,14 +186,33 @@ inline void call_c(const double *xyz, std::size_t n, const Cell &cell,
 /// `out_len` must be `n * k`. `mask` is nullptr or n ints.
 inline void knearest_into(const double *xyz, std::size_t n, const Cell &cell,
                           std::size_t k, int *out, std::size_t out_len,
-                          const int *mask = nullptr, double cell_hint = 0.0) {
+                          const int *mask = nullptr, double cell_hint = 0.0,
+                          double *out_d2 = nullptr) {
   if (k != 0 && n > std::numeric_limits<std::size_t>::max() / k) {
     throw Error("n * k overflows");
   }
   if (out_len != n * k) {
     throw Error("out buffer length must be n * k");
   }
-  detail::call_c(xyz, n, cell, k, out, mask, cell_hint);
+  detail::call_c(xyz, n, cell, k, out, mask, cell_hint, out_d2);
+}
+
+/// Frame-major batch. `xyz` is `n_frames * n * 3`. `out` / `out_d2`
+/// are `n_frames * n * k`.
+inline void knearest_into_many(const double *xyz, std::size_t n,
+                               std::size_t n_frames, const Cell &cell,
+                               std::size_t k, int *out, std::size_t out_len,
+                               const int *mask = nullptr,
+                               double cell_hint = 0.0,
+                               double *out_d2 = nullptr) {
+  if (k != 0 && n_frames != 0 &&
+      n > std::numeric_limits<std::size_t>::max() / k / n_frames) {
+    throw Error("n * k * n_frames overflows");
+  }
+  if (out_len != n * k * n_frames) {
+    throw Error("out buffer length must be n_frames * n * k");
+  }
+  detail::call_c(xyz, n, cell, k, out, mask, cell_hint, out_d2, n_frames);
 }
 
 /// One allocation of n * k indices. `neighbour(i, j)` is the j-th
@@ -189,8 +224,9 @@ knearest(const double *xyz, std::size_t n, const Cell &cell, std::size_t k,
     throw Error("n * k overflows");
   }
   std::vector<int> out(n * k, -1);
-  detail::call_c(xyz, n, cell, k, out.data(), mask, cell_hint);
-  return Neighbours(std::move(out), n, k);
+  std::vector<double> d2(n * k, std::numeric_limits<double>::quiet_NaN());
+  detail::call_c(xyz, n, cell, k, out.data(), mask, cell_hint, d2.data());
+  return Neighbours(std::move(out), std::move(d2), n, k);
 }
 
 /// `std::vector<std::array<double, 3>>` is already packed n * 3 doubles.

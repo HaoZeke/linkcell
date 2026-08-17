@@ -21,6 +21,8 @@ header = """
  *
  * Memory ownership
  *   - lc_knearest writes into caller-owned out_nn (length n * k).
+ *   - lc_knearest_d2 also writes out_d2 (length n * k, unused NaN).
+ *   - lc_knearest_many is the frame-major batch (n_frames * n * k).
  *   - lc_last_error returns a thread-local pointer. Do not free. The
  *     pointer is invalid after the next lc_knearest on the same thread.
  *     lc_version does not read or write the slot.
@@ -97,7 +99,14 @@ usize_is_size_t = true
 # "Missing [defines] entry for feature = capi"; that warning is expected.
 
 [export]
-include = ["lc_cell", "lc_knearest", "lc_last_error", "lc_version"]
+include = [
+    "lc_cell",
+    "lc_knearest",
+    "lc_knearest_d2",
+    "lc_knearest_many",
+    "lc_last_error",
+    "lc_version",
+]
 exclude = ["lc_cell_ortho", "Cell", "Error", "Neighbors", "KHeap"]
 item_types = ["enums", "structs", "unions", "typedefs", "opaque", "functions", "constants"]
 

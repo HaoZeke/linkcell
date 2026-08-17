@@ -128,7 +128,45 @@ pub unsafe extern "C" fn lc_knearest(
     cell_hint: f64,
     out_nn: *mut c_int,
 ) -> c_int {
-    if n == 0 {
+    // SAFETY: same contract as lc_knearest_d2 with a single frame and
+    // no distance buffer.
+    unsafe { lc_knearest_many(xyz, n, 1, simbox, k, mask, cell_hint, out_nn, ptr::null_mut()) }
+}
+
+/// Like [`lc_knearest`], and write squared distances into `out_d2`.
+///
+/// `out_d2` is caller-owned, length `n * k`. Unused slots are `NaN`.
+/// `out_d2` may be `NULL` to skip distances (same as [`lc_knearest`]).
+#[no_mangle]
+pub unsafe extern "C" fn lc_knearest_d2(
+    xyz: *const f64,
+    n: usize,
+    simbox: *const lc_cell,
+    k: usize,
+    mask: *const c_int,
+    cell_hint: f64,
+    out_nn: *mut c_int,
+    out_d2: *mut f64,
+) -> c_int {
+    unsafe { lc_knearest_many(xyz, n, 1, simbox, k, mask, cell_hint, out_nn, out_d2) }
+}
+
+/// Frame-major batch. `xyz` is `n_frames * n` packed triples.
+/// `out_nn` / `out_d2` are `n_frames * n * k`. One shared cell.
+/// `mask` is length `n` or `NULL`. `out_d2` may be `NULL`.
+#[no_mangle]
+pub unsafe extern "C" fn lc_knearest_many(
+    xyz: *const f64,
+    n: usize,
+    n_frames: usize,
+    simbox: *const lc_cell,
+    k: usize,
+    mask: *const c_int,
+    cell_hint: f64,
+    out_nn: *mut c_int,
+    out_d2: *mut f64,
+) -> c_int {
+    if n == 0 || n_frames == 0 {
         return fail(Error::Empty);
     }
     if k == 0 {
@@ -137,15 +175,17 @@ pub unsafe extern "C" fn lc_knearest(
     if xyz.is_null() || simbox.is_null() || out_nn.is_null() {
         return fail_msg("null pointer");
     }
-    let Some(need) = n.checked_mul(k) else {
+    let Some(n_pts) = n.checked_mul(n_frames) else {
+        return fail(Error::Overflow);
+    };
+    let Some(need) = n_pts.checked_mul(k) else {
         return fail(Error::Overflow);
     };
     let max_xyz = (isize::MAX as usize) / 3;
     let max_out = (isize::MAX as usize) / std::mem::size_of::<c_int>();
-    if n > max_xyz || need > max_out {
+    if n_pts > max_xyz || need > max_out {
         return fail(Error::Overflow);
-    };
-    // SAFETY: simbox is non-null, aligned, and points at one valid lc_cell.
+    }
     let box_c = unsafe { *simbox };
     let sim = match Cell::from_vectors(
         [box_c.ax, box_c.ay, box_c.az],
@@ -159,13 +199,11 @@ pub unsafe extern "C" fn lc_knearest(
             return 1;
         }
     };
-    // SAFETY: xyz is non-null, 8-byte aligned, and readable for n packed
-    // xyz triples (n * 3 f64s). [f64; 3] has the same alignment as f64.
-    let pts: &[[f64; 3]] = unsafe { std::slice::from_raw_parts(xyz.cast::<[f64; 3]>(), n) };
+    let pts: &[[f64; 3]] =
+        unsafe { std::slice::from_raw_parts(xyz.cast::<[f64; 3]>(), n_pts) };
     let mask_vec: Option<Vec<bool>> = if mask.is_null() {
         None
     } else {
-        // SAFETY: mask is non-null, aligned for int, and readable for n ints.
         let raw = unsafe { std::slice::from_raw_parts(mask, n) };
         Some(raw.iter().map(|&v| v != 0).collect())
     };
@@ -174,10 +212,30 @@ pub unsafe extern "C" fn lc_knearest(
     } else {
         None
     };
-    // SAFETY: out_nn is non-null, aligned for int, and writable for
-    // n*k ints. n*k fits in usize.
-    let out = unsafe { std::slice::from_raw_parts_mut(out_nn, need) };
-    if let Err(e) = crate::knearest_into(pts, &sim, k, mask_vec.as_deref(), hint, out) {
+    let nn = unsafe { std::slice::from_raw_parts_mut(out_nn, need) };
+    let mut d2_store;
+    let d2 = if out_d2.is_null() {
+        None
+    } else {
+        d2_store = unsafe { std::slice::from_raw_parts_mut(out_d2, need) };
+        Some(&mut d2_store[..])
+    };
+    let err = if n_frames == 1 {
+        crate::knearest_into_d2(pts, &sim, k, mask_vec.as_deref(), hint, nn, d2)
+    } else {
+        crate::knearest_into_many(
+            pts,
+            n,
+            n_frames,
+            &sim,
+            k,
+            mask_vec.as_deref(),
+            hint,
+            nn,
+            d2,
+        )
+    };
+    if let Err(e) = err {
         set_error(&e.to_string());
         return 1;
     }
