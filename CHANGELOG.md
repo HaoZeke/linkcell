@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.3.3
+
+Two wheels: `abi3-py312` (GIL, CPython 3.12+) and `abi3t-py315`
+(PEP 803, CPython 3.15 GIL and free-threaded). cibuildwheel 4.x
+builds 3.15.0rc1 by default. PyO3 0.29 `abi3t-py315`; maturin
+1.14+ tags the `abi3t` ABI. The 0.3.2 `cp314t` set is gone.
+
 ## 0.3.2
 
 Python `linkcell` module (maturin / PyO3). Arrays are DLPack via

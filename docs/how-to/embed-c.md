@@ -19,7 +19,7 @@ the pointer.
 ```
 [wrap-git]
 url = https://github.com/d-SEAMS/linkcell.git
-revision = v0.3.2
+revision = v0.3.3
 depth = 1
 
 [provide]

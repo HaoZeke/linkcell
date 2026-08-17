@@ -1,6 +1,6 @@
 [package]
 name = "linkcell-python"
-version = "0.3.2"
+version = "0.3.3"
 edition = "2021"
 rust-version = "1.88"
 license = "MIT"
@@ -14,6 +14,7 @@ crate-type = ["cdylib"]
 [features]
 default = []
 abi3 = ["pyo3/abi3-py312"]
+abi3t = ["pyo3/abi3t-py315"]
 
 [dependencies]
 dlpk = { version = "0.4.1", features = ["pyo3", "ndarray"] }

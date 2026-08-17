@@ -34,8 +34,9 @@ Python takes the same search through DLPack (dlpk). Any `__dlpack__()`
 object (numpy, torch, jax, cupy) is a valid `xyz` / `cell`, on any
 device. A CUDA `xyz` stays on device; a CUDA `cell` is inverted on
 device. `torch.from_dlpack` consumes `(indices, dist2)`.
-Wheels: one CPython 3.12 limited-ABI (`abi3`) artifact per platform, and
-one free-threaded set (`cp314t`; PyO3 0.29 needs 3.14+ for `t`).
+Wheels: one CPython 3.12 limited-ABI (`abi3`) artifact per platform
+(GIL, 3.12+), and one `abi3t` artifact (CPython 3.15+ GIL and
+free-threaded).
 
 ```
 pip install linkcell
@@ -64,7 +65,7 @@ As a wrap, Meson exposes `linkcell_dep`:
 ```
 [wrap-git]
 url = https://github.com/d-SEAMS/linkcell.git
-revision = v0.3.2
+revision = v0.3.3
 depth = 1
 
 [provide]

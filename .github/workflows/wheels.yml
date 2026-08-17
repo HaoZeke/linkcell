@@ -44,7 +44,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Build abi3 wheel
-        run: uvx --from 'cibuildwheel>=3.2,<4' cibuildwheel --output-dir wheelhouse
+        run: uvx --from 'cibuildwheel>=4,<5' cibuildwheel --output-dir wheelhouse
         env:
           CIBW_BUILD: "cp312-*"
           CIBW_SKIP: "*musllinux* *i686* cp3??t-*"
@@ -57,9 +57,9 @@ jobs:
           name: wheels-abi3-${{ matrix.name }}
           path: ./wheelhouse/*.whl
 
-  # Free-threaded set: one wheel per CPython t ABI (no limited API).
-  freethreaded:
-    name: freethreaded ${{ matrix.name }}
+  # One abi3t wheel per platform (CPython 3.15+ GIL and free-threaded).
+  abi3t:
+    name: abi3t ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -79,18 +79,19 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: astral-sh/setup-uv@v5
         with:
-          python-version: "3.13"
-      - name: Build free-threaded wheels
-        run: uvx --from 'cibuildwheel>=3.2,<4' cibuildwheel --output-dir wheelhouse
+          python-version: "3.15"
+      - name: Build abi3t wheel
+        run: uvx --from 'cibuildwheel>=4,<5' cibuildwheel --output-dir wheelhouse
         env:
-          CIBW_BUILD: "cp314t-*"
-          CIBW_SKIP: "*musllinux* *i686*"
+          CIBW_BUILD: "cp315-*"
+          CIBW_SKIP: "*musllinux* *i686* cp3??t-*"
           CIBW_ARCHS: ${{ matrix.arch }}
+          CIBW_ENVIRONMENT: MATURIN_PEP517_ARGS="--features abi3t"
           CIBW_TEST_REQUIRES: pytest numpy
           CIBW_TEST_COMMAND: pytest {project}/tests/python -q
       - uses: actions/upload-artifact@v4
         with:
-          name: wheels-freethreaded-${{ matrix.name }}
+          name: wheels-abi3t-${{ matrix.name }}
           path: ./wheelhouse/*.whl
 
   sdist:
@@ -114,7 +115,7 @@ jobs:
   # on this job.
   publish:
     name: Publish to PyPI
-    needs: [abi3, freethreaded, sdist]
+    needs: [abi3, abi3t, sdist]
     runs-on: ubuntu-latest
     if: >-
       github.repository == 'd-SEAMS/linkcell' &&
