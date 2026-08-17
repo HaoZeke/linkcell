@@ -2,14 +2,17 @@
 //!
 //! `knearest` takes any `__dlpack__()` object. Host tensors are copied
 //! out of the capsule while it is still alive, then `knearest_into`
-//! runs with the GIL detached. CUDA `xyz` needs a gpulite build.
+//! runs with the GIL detached. CUDA `xyz` (`kDLCUDA`, including
+//! `torch.Tensor` on GPU) is passed by device pointer into `lc_gpu_*`.
 
 use dlpk::pyo3::PyDLPack;
 use dlpk::sys::{
     DLDataTypeCode, DLDeviceType, DLManagedTensor, DLManagedTensorVersioned, DLTensor,
 };
 use dlpk::DLPackTensor;
-use linkcell::{knearest_into, Cell};
+use linkcell::{knearest_into, lc_cell, Cell};
+
+mod gpu;
 use ndarray::Array2;
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::ffi::c_str;
@@ -19,12 +22,12 @@ use pyo3::types::{PyCapsule, PyModule};
 const DLTENSOR_VERSIONED: &std::ffi::CStr = c_str!("dltensor_versioned");
 const DLTENSOR: &std::ffi::CStr = c_str!("dltensor");
 
-fn capsule_of<'py>(obj: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyCapsule>> {
+pub(crate) fn capsule_of<'py>(obj: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyCapsule>> {
     let cap = obj.call_method0("__dlpack__")?;
     cap.cast_into::<PyCapsule>().map_err(Into::into)
 }
 
-fn with_dltensor<R>(
+pub(crate) fn with_dltensor<R>(
     cap: &Bound<'_, PyCapsule>,
     f: impl FnOnce(&DLTensor) -> PyResult<R>,
 ) -> PyResult<R> {
@@ -86,7 +89,7 @@ fn shape_of(t: &DLTensor) -> PyResult<&[i64]> {
     Ok(unsafe { std::slice::from_raw_parts(t.shape, n) })
 }
 
-fn numel(shape: &[i64]) -> PyResult<usize> {
+pub(crate) fn numel(shape: &[i64]) -> PyResult<usize> {
     let mut n: usize = 1;
     for &d in shape {
         if d < 0 {
@@ -211,28 +214,79 @@ fn parse_xyz(buf: &HostF64) -> PyResult<Vec<[f64; 3]>> {
         .collect())
 }
 
-fn parse_cell(buf: &HostF64) -> PyResult<Cell> {
+fn parse_cell(buf: &HostF64) -> PyResult<(Cell, lc_cell)> {
     let d = &buf.data;
-    match buf.shape.as_slice() {
-        [3] => Cell::ortho(d[0], d[1], d[2]).map_err(|e| PyValueError::new_err(e.to_string())),
-        [3, 3] => Cell::from_vectors(
-            [d[0], d[1], d[2]],
-            [d[3], d[4], d[5]],
-            [d[6], d[7], d[8]],
-            [0.0, 0.0, 0.0],
-        )
-        .map_err(|e| PyValueError::new_err(e.to_string())),
-        [4, 3] => Cell::from_vectors(
-            [d[0], d[1], d[2]],
-            [d[3], d[4], d[5]],
-            [d[6], d[7], d[8]],
-            [d[9], d[10], d[11]],
-        )
-        .map_err(|e| PyValueError::new_err(e.to_string())),
-        _ => Err(PyValueError::new_err(
-            "cell must be float64 shape (3,) ortho, (3, 3) lattice rows, or (4, 3) rows plus origin",
-        )),
-    }
+    let (cell, raw) = match buf.shape.as_slice() {
+        [3] => (
+            Cell::ortho(d[0], d[1], d[2]).map_err(|e| PyValueError::new_err(e.to_string()))?,
+            lc_cell {
+                ax: d[0],
+                ay: 0.0,
+                az: 0.0,
+                bx: 0.0,
+                by: d[1],
+                bz: 0.0,
+                cx: 0.0,
+                cy: 0.0,
+                cz: d[2],
+                ox: 0.0,
+                oy: 0.0,
+                oz: 0.0,
+            },
+        ),
+        [3, 3] => (
+            Cell::from_vectors(
+                [d[0], d[1], d[2]],
+                [d[3], d[4], d[5]],
+                [d[6], d[7], d[8]],
+                [0.0, 0.0, 0.0],
+            )
+            .map_err(|e| PyValueError::new_err(e.to_string()))?,
+            lc_cell {
+                ax: d[0],
+                ay: d[1],
+                az: d[2],
+                bx: d[3],
+                by: d[4],
+                bz: d[5],
+                cx: d[6],
+                cy: d[7],
+                cz: d[8],
+                ox: 0.0,
+                oy: 0.0,
+                oz: 0.0,
+            },
+        ),
+        [4, 3] => (
+            Cell::from_vectors(
+                [d[0], d[1], d[2]],
+                [d[3], d[4], d[5]],
+                [d[6], d[7], d[8]],
+                [d[9], d[10], d[11]],
+            )
+            .map_err(|e| PyValueError::new_err(e.to_string()))?,
+            lc_cell {
+                ax: d[0],
+                ay: d[1],
+                az: d[2],
+                bx: d[3],
+                by: d[4],
+                bz: d[5],
+                cx: d[6],
+                cy: d[7],
+                cz: d[8],
+                ox: d[9],
+                oy: d[10],
+                oz: d[11],
+            },
+        ),
+        _ => {
+            return Err(PyValueError::new_err(
+                "cell must be float64 shape (3,) ortho, (3, 3) lattice rows, or (4, 3) rows plus origin",
+            ));
+        }
+    };
+    Ok((cell, raw))
 }
 
 fn to_pydlpack(arr: Array2<i32>) -> PyResult<PyDLPack> {
@@ -253,7 +307,9 @@ fn to_pydlpack(arr: Array2<i32>) -> PyResult<PyDLPack> {
 /// Consume with `numpy.from_dlpack` / `torch.from_dlpack`.
 ///
 /// Host tensors run the rayon CPU walk with the GIL detached. CUDA
-/// `xyz` is rejected unless this extension was built with gpulite.
+/// `xyz` (`torch` / cupy) is passed by device pointer into `lc_gpu_*`.
+/// `cell` stays host. The result is a DLPack int32 `(n, k)` tensor on
+/// the same device as `xyz`.
 #[pyfunction]
 #[pyo3(signature = (xyz, cell, k, mask=None, cell_hint=None))]
 fn knearest<'py>(
@@ -263,27 +319,39 @@ fn knearest<'py>(
     k: usize,
     mask: Option<&Bound<'py, PyAny>>,
     cell_hint: Option<f64>,
-) -> PyResult<Py<PyDLPack>> {
-    let xyz_buf = take_f64(xyz)?;
-    if xyz_buf.cuda {
-        return Err(PyRuntimeError::new_err(
-            "CUDA xyz needs a gpulite build of this extension",
-        ));
+) -> PyResult<Py<PyAny>> {
+    if k == 0 {
+        return Err(PyValueError::new_err("k must be at least 1"));
     }
+    let xyz_cuda = match xyz.call_method0("__dlpack_device__") {
+        Ok(dev) => {
+            let tup = dev.cast::<pyo3::types::PyTuple>()?;
+            let ty: i32 = tup.get_item(0)?.extract()?;
+            ty == 2
+        }
+        Err(_) => {
+            let peek = capsule_of(xyz)?;
+            let flag = with_dltensor(&peek, |t| Ok(is_cuda(t)))?;
+            drop(peek);
+            flag
+        }
+    };
     let cell_buf = take_f64(cell)?;
     if cell_buf.cuda {
         return Err(PyValueError::new_err("cell must be host float64"));
     }
+    let (sim, raw) = parse_cell(&cell_buf)?;
+    if xyz_cuda {
+        let out = gpu::knearest_cuda(py, xyz, &raw, k, mask, cell_hint)?;
+        return Ok(out.into_any());
+    }
+    let xyz_buf = take_f64(xyz)?;
     let pts = parse_xyz(&xyz_buf)?;
     let n = pts.len();
-    let sim = parse_cell(&cell_buf)?;
     let mask_vec = match mask {
         None => None,
         Some(m) => Some(take_mask(m, n)?),
     };
-    if k == 0 {
-        return Err(PyValueError::new_err("k must be at least 1"));
-    }
     let need = n
         .checked_mul(k)
         .ok_or_else(|| PyValueError::new_err("n * k overflows"))?;
@@ -296,12 +364,12 @@ fn knearest<'py>(
     let arr = Array2::from_shape_vec((n, k), out)
         .map_err(|e| PyRuntimeError::new_err(format!("shape: {e}")))?;
     let packed = to_pydlpack(arr)?;
-    Py::new(py, packed)
+    Ok(Py::new(py, packed)?.into_any())
 }
 
 #[pyfunction]
 fn gpu_available() -> bool {
-    false
+    gpu::available()
 }
 
 #[pymodule]
@@ -309,6 +377,7 @@ fn _lib(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(knearest, m)?)?;
     m.add_function(wrap_pyfunction!(gpu_available, m)?)?;
     m.add_class::<PyDLPack>()?;
+    m.add_class::<gpu::DlpackCuda>()?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }

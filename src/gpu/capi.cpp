@@ -1,6 +1,10 @@
 #include "linkcell_gpu.h"
 #include "linkcell_gpu.hpp"
 
+#if defined(LINKCELL_HAS_GPULITE)
+#include <gpulite/gpulite.hpp>
+#endif
+
 #include <new>
 #include <string>
 
@@ -118,6 +122,84 @@ void lc_gpu_wait(lc_gpu_workspace *ws) {
   }
 #else
   (void)ws;
+#endif
+}
+
+int lc_gpu_alloc(void **ptr, size_t bytes) {
+#if defined(LINKCELL_HAS_GPULITE)
+  if (ptr == nullptr) {
+    set_err("null pointer");
+    return 1;
+  }
+  if (!linkcell::gpu::available()) {
+    set_err("CUDA driver or nvrtc not loaded");
+    return 1;
+  }
+  try {
+    auto &rt = gpulite::CUDART::instance();
+    auto st = rt.cudaMalloc(ptr, bytes);
+    if (st != cudaSuccess) {
+      set_err(rt.cudaGetErrorString(st));
+      return 1;
+    }
+    set_err(nullptr);
+    return 0;
+  } catch (const std::exception &e) {
+    set_err(e.what());
+    return 1;
+  }
+#else
+  (void)ptr;
+  (void)bytes;
+  set_err("built without gpulite");
+  return 1;
+#endif
+}
+
+void lc_gpu_free(void *ptr) {
+#if defined(LINKCELL_HAS_GPULITE)
+  if (ptr != nullptr && gpulite::CUDART::loaded()) {
+    gpulite::CUDART::instance().cudaFree(ptr);
+  }
+#else
+  (void)ptr;
+#endif
+}
+
+int lc_gpu_fill_i32(void *ptr, int value, size_t n) {
+#if defined(LINKCELL_HAS_GPULITE)
+  if (ptr == nullptr && n != 0) {
+    set_err("null pointer");
+    return 1;
+  }
+  if (!linkcell::gpu::available()) {
+    set_err("CUDA driver or nvrtc not loaded");
+    return 1;
+  }
+  try {
+    auto &rt = gpulite::CUDART::instance();
+    if (value == 0 || value == -1) {
+      const unsigned char byte = value == 0 ? 0 : 0xFF;
+      auto st = rt.cudaMemset(ptr, byte, n * sizeof(int));
+      if (st != cudaSuccess) {
+        set_err(rt.cudaGetErrorString(st));
+        return 1;
+      }
+      set_err(nullptr);
+      return 0;
+    }
+    set_err("lc_gpu_fill_i32 only supports 0 and -1");
+    return 1;
+  } catch (const std::exception &e) {
+    set_err(e.what());
+    return 1;
+  }
+#else
+  (void)ptr;
+  (void)value;
+  (void)n;
+  set_err("built without gpulite");
+  return 1;
 #endif
 }
 

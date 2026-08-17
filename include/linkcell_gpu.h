@@ -42,6 +42,10 @@ int lc_gpu_knearest_many(lc_gpu_workspace *ws, const double *xyz, size_t n,
 void *lc_gpu_queue(lc_gpu_workspace *ws);
 void lc_gpu_wait(lc_gpu_workspace *ws);
 
+int lc_gpu_alloc(void **ptr, size_t bytes);
+void lc_gpu_free(void *ptr);
+int lc_gpu_fill_i32(void *ptr, int value, size_t n);
+
 #ifdef __cplusplus
 }
 #endif

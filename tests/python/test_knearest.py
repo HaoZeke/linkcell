@@ -45,5 +45,5 @@ def test_k_zero():
         linkcell.knearest(xyz, cell, 0)
 
 
-def test_gpu_available_cpu_wheel():
-    assert linkcell.gpu_available() is False
+def test_gpu_available_is_bool():
+    assert isinstance(linkcell.gpu_available(), bool)

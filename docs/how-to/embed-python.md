@@ -20,9 +20,12 @@ assert int(nn[0, 0]) == 1
 origin. Optional `mask` is length `n`. The GIL is detached for the
 rayon CPU walk.
 
-CUDA `xyz` (`kDLCUDA`) is the device `Workspace` path
-(`lc_gpu_knearest`). Default wheels are host-only;
-`linkcell.gpu_available()` is then false.
+CUDA `xyz` (`kDLCUDA`, including a `torch.Tensor` on GPU) is passed
+by device pointer into `lc_gpu_knearest`. `cell` stays host. The
+return capsule is on the same CUDA device; `torch.from_dlpack`
+takes it without a host bounce. `linkcell.gpu_available()` is true
+when the driver and nvrtc load (gpulite, no CUDA SDK at build
+time).
 
 Wheels:
 

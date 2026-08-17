@@ -31,8 +31,9 @@ plus `include/linkcell.h` or `include/linkcell.hpp`. Meson, CMake, and
 pkg-config all install that archive and those headers.
 
 Python takes the same search through DLPack (dlpk). Any `__dlpack__()`
-object (numpy, torch, jax, cupy) is a valid `xyz` / `cell`. The result
-is a DLPack int32 tensor (`numpy.from_dlpack` / `torch.from_dlpack`).
+object (numpy, torch, jax, cupy) is a valid `xyz` / `cell`. A CUDA
+`xyz` (`torch.Tensor` on GPU) stays on device; `torch.from_dlpack`
+consumes the result. `cell` is host.
 Wheels: one CPython 3.12 limited-ABI (`abi3`) artifact per platform, and
 one free-threaded set (`cp313t` / `cp314t`).
 

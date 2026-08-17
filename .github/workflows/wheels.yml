@@ -11,6 +11,8 @@ on:
       - "Cargo.toml"
       - "Cargo.lock"
       - "src/**"
+      - "third_party/**"
+      - "include/**"
       - ".github/workflows/wheels.yml"
 
 concurrency:
