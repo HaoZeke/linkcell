@@ -213,7 +213,7 @@ pub unsafe extern "C" fn lc_knearest_many(
         None
     };
     let nn = unsafe { std::slice::from_raw_parts_mut(out_nn, need) };
-    let mut d2_store;
+    let d2_store;
     let d2 = if out_d2.is_null() {
         None
     } else {

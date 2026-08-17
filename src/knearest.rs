@@ -228,7 +228,7 @@ pub fn knearest_into_many(
     mask: Option<&[bool]>,
     cell_hint: Option<f64>,
     out_nn: &mut [i32],
-    out_d2: Option<&mut [f64]>,
+    mut out_d2: Option<&mut [f64]>,
 ) -> Result<(), Error> {
     if n_frames == 0 {
         return Err(Error::Empty);
