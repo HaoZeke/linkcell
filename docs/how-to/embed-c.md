@@ -1,7 +1,9 @@
 # Embed linkcell from C
 
 Link the installed `staticlib` and include `linkcell.h`. The C ABI is
-the hourglass waist; every other language wraps `lc_*`.
+the hourglass waist; every other language wraps `lc_*`. Python wraps
+it with DLPack (dlpk); see [Embed from Python](embed-python.md).
+Device searches use `lc_gpu_*` (`include/linkcell_gpu.h`).
 
 `lc_knearest` takes packed `double` xyz (`n` triples), `size_t n`,
 `size_t k`, and a caller-owned `int` buffer of length `n * k`. Unused

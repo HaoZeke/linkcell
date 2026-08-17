@@ -126,7 +126,7 @@ if _gpu_on
   _gpu_args += ['-DLINKCELL_HAS_GPULITE=1']
   linkcell_gpu = static_library(
     'linkcell_gpu',
-    'src/gpu/knearest.cpp',
+    ['src/gpu/knearest.cpp', 'src/gpu/capi.cpp'],
     include_directories: include_directories('include'),
     dependencies: [gpulite_dep],
     cpp_args: _gpu_args,
@@ -151,7 +151,7 @@ meson.override_dependency('linkcell', linkcell_dep)
 
 if _install
   install_headers('include/linkcell.h', 'include/linkcell.hpp',
-                  'include/linkcell_gpu.hpp')
+                  'include/linkcell_gpu.h', 'include/linkcell_gpu.hpp')
   pkg = import('pkgconfig')
   pkg.generate(
     name: 'linkcell',

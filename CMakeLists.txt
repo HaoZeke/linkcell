@@ -182,6 +182,8 @@ if(LINKCELL_INSTALL)
   install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/include/linkcell.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/linkcell.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/linkcell_gpu.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/linkcell_gpu.hpp"
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
   )
   install(FILES "${CMAKE_CURRENT_BINARY_DIR}/linkcell.pc"

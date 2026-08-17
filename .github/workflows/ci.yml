@@ -87,6 +87,8 @@ jobs:
           pkg-config --cflags --libs linkcell
           test -f "$prefix/include/linkcell.h"
           test -f "$prefix/include/linkcell.hpp"
+          test -f "$prefix/include/linkcell_gpu.h"
+          test -f "$prefix/include/linkcell_gpu.hpp"
           test -f "$prefix/lib/x86_64-linux-gnu/liblinkcell.a" \
             -o -f "$prefix/lib/liblinkcell.a"
           test -f "$prefix/lib/x86_64-linux-gnu/liblinkcell.so" \
