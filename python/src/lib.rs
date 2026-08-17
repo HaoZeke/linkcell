@@ -10,10 +10,10 @@ use dlpk::sys::{
     DLDataTypeCode, DLDeviceType, DLManagedTensor, DLManagedTensorVersioned, DLTensor,
 };
 use dlpk::DLPackTensor;
-use linkcell::{knearest_into, lc_cell, Cell};
+use linkcell::{knearest_into_d2, knearest_into_many, lc_cell, Cell};
+use ndarray::{Array2, Array3};
 
 mod gpu;
-use ndarray::Array2;
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::ffi::c_str;
 use pyo3::prelude::*;
@@ -75,6 +75,21 @@ fn is_cuda(t: &DLTensor) -> bool {
     t.device.device_type == DLDeviceType::kDLCUDA
 }
 
+pub(crate) fn peek_cuda(obj: &Bound<'_, PyAny>) -> PyResult<bool> {
+    match obj.call_method0("__dlpack_device__") {
+        Ok(dev) => {
+            let tup = dev.cast::<pyo3::types::PyTuple>()?;
+            let ty: i32 = tup.get_item(0)?.extract()?;
+            Ok(ty == 2)
+        }
+        Err(_) => {
+            let peek = capsule_of(obj)?;
+            let flag = with_dltensor(&peek, |t| Ok(is_cuda(t)))?;
+            Ok(flag)
+        }
+    }
+}
+
 fn shape_of(t: &DLTensor) -> PyResult<&[i64]> {
     if t.ndim < 0 {
         return Err(PyValueError::new_err("negative ndim"));
@@ -131,13 +146,12 @@ fn data_ptr<T>(t: &DLTensor) -> *const T {
         .cast_const()
 }
 
-struct HostF64 {
+pub(crate) struct HostF64 {
     data: Vec<f64>,
     shape: Vec<i64>,
-    cuda: bool,
 }
 
-fn take_f64(obj: &Bound<'_, PyAny>) -> PyResult<HostF64> {
+pub(crate) fn take_f64(obj: &Bound<'_, PyAny>) -> PyResult<HostF64> {
     let cap = capsule_of(obj)?;
     with_dltensor(&cap, |t| {
         if !is_f64(t) {
@@ -147,11 +161,17 @@ fn take_f64(obj: &Bound<'_, PyAny>) -> PyResult<HostF64> {
         let n = numel(&shape)?;
         require_c_contiguous(t, &shape)?;
         if is_cuda(t) {
-            return Ok(HostF64 {
-                data: Vec::new(),
-                shape,
-                cuda: true,
-            });
+            let ptr = data_ptr::<f64>(t);
+            if ptr.is_null() && n != 0 {
+                return Err(PyValueError::new_err("null data pointer"));
+            }
+            let mut data = vec![0.0f64; n];
+            gpu::copy_dtoh(
+                data.as_mut_ptr().cast(),
+                ptr.cast(),
+                n * std::mem::size_of::<f64>(),
+            )?;
+            return Ok(HostF64 { data, shape });
         }
         if !is_host(t) {
             return Err(PyValueError::new_err("unsupported dlpack device"));
@@ -161,11 +181,7 @@ fn take_f64(obj: &Bound<'_, PyAny>) -> PyResult<HostF64> {
             return Err(PyValueError::new_err("null data pointer"));
         }
         let data = unsafe { std::slice::from_raw_parts(ptr, n) }.to_vec();
-        Ok(HostF64 {
-            data,
-            shape,
-            cuda: false,
-        })
+        Ok(HostF64 { data, shape })
     })
 }
 
@@ -194,27 +210,29 @@ fn take_mask(obj: &Bound<'_, PyAny>, n: usize) -> PyResult<Vec<bool>> {
     })
 }
 
-fn parse_xyz(buf: &HostF64) -> PyResult<Vec<[f64; 3]>> {
-    let n = match buf.shape.as_slice() {
-        [n, 3] if *n > 0 => *n as usize,
-        [n] if *n > 0 && *n % 3 == 0 => (*n as usize) / 3,
+fn parse_xyz(buf: &HostF64) -> PyResult<(Vec<[f64; 3]>, usize, usize)> {
+    let (n, frames) = match buf.shape.as_slice() {
+        [n, 3] if *n > 0 => (*n as usize, 1usize),
+        [f, n, 3] if *f > 0 && *n > 0 => (*n as usize, *f as usize),
+        [n] if *n > 0 && *n % 3 == 0 => ((*n as usize) / 3, 1usize),
         _ => {
             return Err(PyValueError::new_err(
-                "xyz must be float64 shape (n, 3) or (n*3,)",
+                "xyz must be float64 shape (n, 3), (n_frames, n, 3), or (n*3,)",
             ));
         }
     };
-    if buf.data.len() != n * 3 {
+    if buf.data.len() != n * frames * 3 {
         return Err(PyValueError::new_err("xyz size mismatch"));
     }
-    Ok(buf
+    let pts = buf
         .data
         .chunks_exact(3)
         .map(|c| [c[0], c[1], c[2]])
-        .collect())
+        .collect();
+    Ok((pts, n, frames))
 }
 
-fn parse_cell(buf: &HostF64) -> PyResult<(Cell, lc_cell)> {
+pub(crate) fn parse_cell(buf: &HostF64) -> PyResult<(Cell, lc_cell)> {
     let d = &buf.data;
     let (cell, raw) = match buf.shape.as_slice() {
         [3] => (
@@ -289,7 +307,11 @@ fn parse_cell(buf: &HostF64) -> PyResult<(Cell, lc_cell)> {
     Ok((cell, raw))
 }
 
-fn to_pydlpack(arr: Array2<i32>) -> PyResult<PyDLPack> {
+fn to_pydlpack<A>(arr: A) -> PyResult<PyDLPack>
+where
+    DLPackTensor: TryFrom<A>,
+    <DLPackTensor as TryFrom<A>>::Error: std::fmt::Display,
+{
     let tensor = DLPackTensor::try_from(arr)
         .map_err(|e| PyRuntimeError::new_err(format!("ndarray -> dlpack: {e}")))?;
     PyDLPack::try_from(tensor)
@@ -299,17 +321,17 @@ fn to_pydlpack(arr: Array2<i32>) -> PyResult<PyDLPack> {
 /// Periodic linked-cell k-nearest search.
 ///
 /// `xyz` and `cell` are any `__dlpack__()` objects. `xyz` is float64
-/// `(n, 3)`. `cell` is float64 `(3,)` (ortho lengths), `(3, 3)`
-/// lattice rows, or `(4, 3)` rows plus origin. `mask`, if given, is
-/// length `n`.
+/// `(n, 3)` or `(n_frames, n, 3)`. `cell` is float64 `(3,)` (ortho
+/// lengths), `(3, 3)` lattice rows, or `(4, 3)` rows plus origin, on
+/// any device. `mask`, if given, is length `n`.
 ///
-/// Returns a DLPack int32 tensor of shape `(n, k)`, unused slots `-1`.
-/// Consume with `numpy.from_dlpack` / `torch.from_dlpack`.
+/// Returns `(indices, dist2)` as two DLPack tensors. Indices are int32
+/// (`-1` unused). `dist2` is float64 (`NaN` unused). Shape is `(n, k)`
+/// or `(n_frames, n, k)` when `xyz` is `(n_frames, n, 3)`.
 ///
 /// Host tensors run the rayon CPU walk with the GIL detached. CUDA
-/// `xyz` (`torch` / cupy) is passed by device pointer into `lc_gpu_*`.
-/// `cell` stays host. The result is a DLPack int32 `(n, k)` tensor on
-/// the same device as `xyz`.
+/// `xyz` is passed by device pointer into `lc_gpu_*`. A CUDA `cell`
+/// is inverted on device; the host only reads the four launch ints.
 #[pyfunction]
 #[pyo3(signature = (xyz, cell, k, mask=None, cell_hint=None))]
 fn knearest<'py>(
@@ -319,52 +341,74 @@ fn knearest<'py>(
     k: usize,
     mask: Option<&Bound<'py, PyAny>>,
     cell_hint: Option<f64>,
-) -> PyResult<Py<PyAny>> {
+) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
     if k == 0 {
         return Err(PyValueError::new_err("k must be at least 1"));
     }
-    let xyz_cuda = match xyz.call_method0("__dlpack_device__") {
-        Ok(dev) => {
-            let tup = dev.cast::<pyo3::types::PyTuple>()?;
-            let ty: i32 = tup.get_item(0)?.extract()?;
-            ty == 2
-        }
-        Err(_) => {
-            let peek = capsule_of(xyz)?;
-            let flag = with_dltensor(&peek, |t| Ok(is_cuda(t)))?;
-            drop(peek);
-            flag
-        }
-    };
-    let cell_buf = take_f64(cell)?;
-    if cell_buf.cuda {
-        return Err(PyValueError::new_err("cell must be host float64"));
-    }
-    let (sim, raw) = parse_cell(&cell_buf)?;
+    let xyz_cuda = peek_cuda(xyz)?;
     if xyz_cuda {
-        let out = gpu::knearest_cuda(py, xyz, &raw, k, mask, cell_hint)?;
-        return Ok(out.into_any());
+        return gpu::knearest_cuda(py, xyz, cell, k, mask, cell_hint, 0);
     }
+    let cell_buf = take_f64(cell)?;
+    let (sim, _) = parse_cell(&cell_buf)?;
     let xyz_buf = take_f64(xyz)?;
-    let pts = parse_xyz(&xyz_buf)?;
-    let n = pts.len();
+    let (pts, n, n_frames) = parse_xyz(&xyz_buf)?;
     let mask_vec = match mask {
         None => None,
         Some(m) => Some(take_mask(m, n)?),
     };
     let need = n
         .checked_mul(k)
-        .ok_or_else(|| PyValueError::new_err("n * k overflows"))?;
-    let mut out = vec![-1i32; need];
+        .and_then(|v| v.checked_mul(n_frames))
+        .ok_or_else(|| PyValueError::new_err("n * k * n_frames overflows"))?;
+    let mut nn = vec![-1i32; need];
+    let mut d2 = vec![f64::NAN; need];
     let hint = cell_hint.filter(|h| *h > 0.0);
     py.detach(|| {
-        knearest_into(&pts, &sim, k, mask_vec.as_deref(), hint, &mut out)
-            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+        if n_frames == 1 {
+            knearest_into_d2(
+                &pts,
+                &sim,
+                k,
+                mask_vec.as_deref(),
+                hint,
+                &mut nn,
+                Some(&mut d2),
+            )
+        } else {
+            knearest_into_many(
+                &pts,
+                n,
+                n_frames,
+                &sim,
+                k,
+                mask_vec.as_deref(),
+                hint,
+                &mut nn,
+                Some(&mut d2),
+            )
+        }
+        .map_err(|e| PyRuntimeError::new_err(e.to_string()))
     })?;
-    let arr = Array2::from_shape_vec((n, k), out)
-        .map_err(|e| PyRuntimeError::new_err(format!("shape: {e}")))?;
-    let packed = to_pydlpack(arr)?;
-    Ok(Py::new(py, packed)?.into_any())
+    if n_frames == 1 {
+        let nn_a = Array2::from_shape_vec((n, k), nn)
+            .map_err(|e| PyRuntimeError::new_err(format!("shape: {e}")))?;
+        let d2_a = Array2::from_shape_vec((n, k), d2)
+            .map_err(|e| PyRuntimeError::new_err(format!("shape: {e}")))?;
+        Ok((
+            Py::new(py, to_pydlpack(nn_a)?)?.into_any(),
+            Py::new(py, to_pydlpack(d2_a)?)?.into_any(),
+        ))
+    } else {
+        let nn_a = Array3::from_shape_vec((n_frames, n, k), nn)
+            .map_err(|e| PyRuntimeError::new_err(format!("shape: {e}")))?;
+        let d2_a = Array3::from_shape_vec((n_frames, n, k), d2)
+            .map_err(|e| PyRuntimeError::new_err(format!("shape: {e}")))?;
+        Ok((
+            Py::new(py, to_pydlpack(nn_a)?)?.into_any(),
+            Py::new(py, to_pydlpack(d2_a)?)?.into_any(),
+        ))
+    }
 }
 
 #[pyfunction]
@@ -377,7 +421,7 @@ fn _lib(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(knearest, m)?)?;
     m.add_function(wrap_pyfunction!(gpu_available, m)?)?;
     m.add_class::<PyDLPack>()?;
-    m.add_class::<gpu::DlpackCuda>()?;
+    m.add_class::<gpu::StreamDlpack>()?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }
