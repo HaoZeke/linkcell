@@ -12,6 +12,10 @@ keywords = ["molecular-dynamics", "neighbours", "periodic", "cell-list"]
 categories = ["science", "algorithms"]
 readme = "README.md"
 
+[workspace]
+members = ["python"]
+resolver = "2"
+
 [lib]
 name = "linkcell"
 crate-type = ["rlib", "staticlib", "cdylib"]

@@ -30,6 +30,25 @@ C and C++ consumers take the `staticlib` (`--features capi`, on by default)
 plus `include/linkcell.h` or `include/linkcell.hpp`. Meson, CMake, and
 pkg-config all install that archive and those headers.
 
+Python takes the same search through DLPack (dlpk). Any `__dlpack__()`
+object (numpy, torch, jax, cupy) is a valid `xyz` / `cell`. The result
+is a DLPack int32 tensor (`numpy.from_dlpack` / `torch.from_dlpack`).
+Wheels: one CPython 3.12 limited-ABI (`abi3`) artifact per platform, and
+one free-threaded set (`cp313t` / `cp314t`).
+
+```
+pip install linkcell
+```
+
+```python
+import numpy as np
+import linkcell
+
+xyz = np.array([[0.2, 0.0, 0.0], [9.4, 0.0, 0.0]], dtype=np.float64)
+cell = np.array([10.0, 10.0, 10.0], dtype=np.float64)
+nn = np.from_dlpack(linkcell.knearest(xyz, cell, 1))
+```
+
 ### Meson
 
 ```

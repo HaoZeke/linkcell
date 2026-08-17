@@ -1,0 +1,42 @@
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[project]
+name = "linkcell"
+version = "0.3.1"
+description = "Periodic linked-cell k-nearest neighbour search"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.12"
+authors = [{ name = "Rohit Goswami", email = "rgoswami@ieee.org" }]
+classifiers = [
+  "Programming Language :: Rust",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+]
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest>=8.0", "numpy>=1.26"]
+
+[project.urls]
+Homepage = "https://github.com/d-SEAMS/linkcell"
+Repository = "https://github.com/d-SEAMS/linkcell"
+Documentation = "https://docs.rs/linkcell"
+
+[tool.maturin]
+manifest-path = "python/Cargo.toml"
+module-name = "linkcell._lib"
+python-source = "."
+features = ["pyo3/extension-module"]
+
+[tool.cibuildwheel]
+skip = ["pp*", "*musllinux*", "*i686*"]
+test-requires = ["pytest", "numpy"]
+test-command = "pytest {project}/tests/python -q"
+
+[tool.pytest.ini_options]
+testpaths = ["tests/python"]

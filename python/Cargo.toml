@@ -1,0 +1,22 @@
+[package]
+name = "linkcell-python"
+version = "0.3.1"
+edition = "2021"
+rust-version = "1.88"
+license = "MIT"
+publish = false
+description = "Python bindings for linkcell (DLPack / dlpk)"
+
+[lib]
+name = "_lib"
+crate-type = ["cdylib"]
+
+[features]
+default = []
+abi3 = ["pyo3/abi3-py312"]
+
+[dependencies]
+dlpk = { version = "0.4.1", features = ["pyo3", "ndarray"] }
+linkcell = { path = ".." }
+ndarray = "0.17"
+pyo3 = { version = "0.29", features = ["extension-module"] }

@@ -1,0 +1,92 @@
+name: wheels
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - "python/**"
+      - "linkcell/**"
+      - "pyproject.toml"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "src/**"
+      - ".github/workflows/wheels.yml"
+
+concurrency:
+  group: wheels-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  # One abi3 wheel per platform (CPython 3.12+ GIL).
+  abi3:
+    name: abi3 ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            os: ubuntu-latest
+            arch: x86_64
+          - name: linux-aarch64
+            os: ubuntu-24.04-arm
+            arch: aarch64
+          - name: macos-arm64
+            os: macos-latest
+            arch: arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: Build abi3 wheel
+        run: uvx --from cibuildwheel cibuildwheel --output-dir wheelhouse
+        env:
+          CIBW_BUILD: "cp312-*"
+          CIBW_SKIP: "*musllinux* *i686* pp* cp3??t-*"
+          CIBW_ARCHS: ${{ matrix.arch }}
+          CIBW_ENVIRONMENT: MATURIN_PEP517_ARGS="--features abi3"
+          CIBW_TEST_REQUIRES: pytest numpy
+          CIBW_TEST_COMMAND: pytest {project}/tests/python -q
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-abi3-${{ matrix.name }}
+          path: ./wheelhouse/*.whl
+
+  # Free-threaded set: one wheel per CPython t ABI (no limited API).
+  freethreaded:
+    name: freethreaded ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            os: ubuntu-latest
+            arch: x86_64
+          - name: linux-aarch64
+            os: ubuntu-24.04-arm
+            arch: aarch64
+          - name: macos-arm64
+            os: macos-latest
+            arch: arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+      - name: Build free-threaded wheels
+        run: uvx --from cibuildwheel cibuildwheel --output-dir wheelhouse
+        env:
+          CIBW_BUILD: "cp313t-* cp314t-*"
+          CIBW_SKIP: "*musllinux* *i686* pp*"
+          CIBW_ARCHS: ${{ matrix.arch }}
+          CIBW_TEST_REQUIRES: pytest numpy
+          CIBW_TEST_COMMAND: pytest {project}/tests/python -q
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-freethreaded-${{ matrix.name }}
+          path: ./wheelhouse/*.whl

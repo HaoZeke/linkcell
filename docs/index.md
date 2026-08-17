@@ -2,7 +2,7 @@
 
 Periodic linked-cell k-nearest neighbour search. The Rust crate is the
 implementation. The C ABI (`lc_*`) is the hourglass waist. C++ is a
-typed header over that ABI.
+typed header over that ABI. Python is DLPack (dlpk) over that waist.
 
 ## Tutorials
 
@@ -12,6 +12,7 @@ typed header over that ABI.
 
 - [Embed from C](how-to/embed-c.md)
 - [Embed from C++](how-to/embed-cpp.md)
+- [Embed from Python](how-to/embed-python.md)
 - [pkg-config / Meson / CMake](how-to/pkg-config.md)
 
 ## Reference
