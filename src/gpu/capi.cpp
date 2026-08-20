@@ -2,7 +2,7 @@
 #include "linkcell_gpu.hpp"
 
 #if defined(LINKCELL_HAS_GPULITE)
-#include <gpulite/gpulite.hpp>
+#include "gpulite_compat.hpp"
 #endif
 
 #include <new>

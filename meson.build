@@ -23,6 +23,7 @@ _mbproot = meson.project_build_root()
 if host_machine.system() == 'windows'
   cargo_shared = 'linkcell.dll'
   cargo_static = 'linkcell.lib'
+  cargo_implib = 'linkcell.dll.lib'
 else
   _so = host_machine.system() == 'darwin' ? '.dylib' : '.so'
   cargo_shared = 'liblinkcell' + _so
@@ -30,6 +31,30 @@ else
 endif
 
 _profile = get_option('buildtype') == 'debug' ? 'debug' : 'release'
+
+_cargo_outputs = [cargo_shared, cargo_static]
+_cargo_install_dirs = [get_option('libdir'), get_option('libdir')]
+_cargo_command = [
+  py,
+  files('scripts/copy-cargo-artifacts.py'),
+  '--cargo', cargo_prog.full_path(),
+  '--source', _msproot,
+  '--target', _mbproot / 'cargo-target',
+  '--profile', _profile,
+  '--shared', cargo_shared,
+  '--static', cargo_static,
+  '--out-shared', '@OUTPUT0@',
+  '--out-static', '@OUTPUT1@',
+]
+if host_machine.system() == 'windows'
+  _cargo_outputs += [cargo_implib]
+  _cargo_install_dirs = [get_option('bindir'), get_option('libdir'),
+                         get_option('libdir')]
+  _cargo_command += [
+    '--implib', cargo_implib,
+    '--out-implib', '@OUTPUT2@',
+  ]
+endif
 
 # cargo rustc emits both crate types; the target lists both so Meson
 # does not pretend the static archive is the only artifact.
@@ -43,34 +68,13 @@ linkcell_cargo = custom_target(
     'src/cell.rs',
     'src/error.rs',
     'src/capi.rs',
+    'scripts/copy-cargo-artifacts.py',
   ),
-  output: [cargo_shared, cargo_static],
-  command: [
-    py, '-c',
-    'import shutil, subprocess, sys; from pathlib import Path; ' +
-    'cargo, src, target, profile, shared, archive, out_s, out_a = sys.argv[1:9]; ' +
-    'cmd = [cargo, "rustc", "--lib", "--manifest-path", str(Path(src) / "Cargo.toml"), ' +
-    '"--target-dir", target, "--features", "capi"]; ' +
-    'Path(src, "Cargo.lock").is_file() and cmd.append("--locked"); ' +
-    'profile == "release" and cmd.append("--release"); ' +
-    'rustc = ["--crate-type=cdylib", "--crate-type=staticlib"]; ' +
-    'sys.platform.startswith("linux") and rustc.append("-Clink-arg=-Wl,-soname," + shared); ' +
-    'sys.platform == "darwin" and rustc.append("-Clink-arg=-Wl,-install_name," + chr(64) + "rpath/" + shared); ' +
-    'cmd.extend(["--"] + rustc); subprocess.check_call(cmd); ' +
-    'built = Path(target) / profile; ' +
-    'shutil.copy2(built / shared, out_s); shutil.copy2(built / archive, out_a)',
-    cargo_prog.full_path(),
-    _msproot,
-    _mbproot / 'cargo-target',
-    _profile,
-    cargo_shared,
-    cargo_static,
-    '@OUTPUT0@',
-    '@OUTPUT1@',
-  ],
+  output: _cargo_outputs,
+  command: _cargo_command,
   build_by_default: true,
   install: _install,
-  install_dir: [get_option('libdir'), get_option('libdir')],
+  install_dir: _cargo_install_dirs,
 )
 
 rust_sys = [dependency('threads')]
@@ -110,7 +114,13 @@ linkcell_built_h = custom_target(
 # shared default here would leave the module needing liblinkcell.so
 # at import time. Subprojects always take the static archive.
 _use_static = meson.is_subproject() or get_option('default_library') == 'static'
-_link_idx = _use_static ? 1 : 0
+if _use_static
+  _link_idx = 1
+elif host_machine.system() == 'windows'
+  _link_idx = 2
+else
+  _link_idx = 0
+endif
 
 _gpu_opt = get_option('with_gpulite')
 gpulite_dep = dependency('gpulite', required: false,

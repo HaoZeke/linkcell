@@ -2,7 +2,7 @@
 
 #ifdef LINKCELL_HAS_GPULITE
 
-#include <gpulite/gpulite.hpp>
+#include "gpulite_compat.hpp"
 
 #include <algorithm>
 #include <cmath>
