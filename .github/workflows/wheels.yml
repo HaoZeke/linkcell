@@ -47,6 +47,7 @@ jobs:
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           python-version: "3.12"
+          cache-suffix: abi3-${{ matrix.arch }}
       - name: Build abi3 wheel
         run: uvx --from 'cibuildwheel>=4,<5' cibuildwheel --output-dir wheelhouse
         env:
@@ -89,6 +90,7 @@ jobs:
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           python-version: "3.15"
+          cache-suffix: abi3t-${{ matrix.arch }}
       - name: Build abi3t wheel
         run: uvx --from 'cibuildwheel>=4,<5' cibuildwheel --output-dir wheelhouse
         env:
@@ -113,6 +115,7 @@ jobs:
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           python-version: "3.12"
+          cache-suffix: sdist
       - name: Build sdist
         run: uvx maturin sdist --out dist
       - name: Test installed sdist
