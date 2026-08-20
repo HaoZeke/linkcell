@@ -105,6 +105,7 @@ add_dependencies(linkcell linkcell_cargo)
 set_target_properties(linkcell PROPERTIES
   IMPORTED_LOCATION "${LINKCELL_SHARED}"
   INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/include"
+  INTERFACE_COMPILE_FEATURES cxx_std_17
 )
 if(WIN32)
   set_target_properties(linkcell PROPERTIES IMPORTED_IMPLIB "${LINKCELL_IMPLIB}")
@@ -125,6 +126,7 @@ add_dependencies(linkcell_static linkcell_cargo)
 set_target_properties(linkcell_static PROPERTIES
   IMPORTED_LOCATION "${LINKCELL_STATIC}"
   INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/include"
+  INTERFACE_COMPILE_FEATURES cxx_std_17
   INTERFACE_LINK_LIBRARIES "${_linkcell_sys}"
 )
 

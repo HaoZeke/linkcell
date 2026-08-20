@@ -13,7 +13,8 @@ if(NOT TARGET linkcell::linkcell)
   add_library(linkcell::linkcell SHARED IMPORTED)
   set_target_properties(linkcell::linkcell PROPERTIES
     IMPORTED_LOCATION "${LINKCELL_LIBRARY}"
-    INTERFACE_INCLUDE_DIRECTORIES "${LINKCELL_INCLUDE_DIR}")
+    INTERFACE_INCLUDE_DIRECTORIES "${LINKCELL_INCLUDE_DIR}"
+    INTERFACE_COMPILE_FEATURES cxx_std_17)
   if(WIN32)
     set_target_properties(linkcell::linkcell PROPERTIES
       IMPORTED_IMPLIB "${LINKCELL_IMPLIB}")
