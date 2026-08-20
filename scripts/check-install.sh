@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Verify a Meson or CMake install of linkcell: headers, cdylib, pkg-config,
-# and find_package(linkcell) / a tiny consumer configure.
+# Verify a Meson or CMake install of linkcell: CPU/GPU headers, libraries,
+# pkg-config, and find_package(linkcell) / tiny consumer configure.
 #
 # Does not compile the consumer. Set LINKCELL_SKIP_BUILD=1 when the prefixes
 # already exist and only the layout / configure checks should run.
@@ -54,15 +54,23 @@ check_pkgconfig() {
   local pcdir="$1" label="$2"
   export PKG_CONFIG_PATH="$pcdir${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
   pkg-config --exists --print-errors linkcell
-  local ver cflags libs
+  pkg-config --exists --print-errors linkcell-gpu
+  local ver cflags libs gpu_ver gpu_cflags gpu_libs
   ver="$(pkg-config --modversion linkcell)"
   cflags="$(pkg-config --cflags linkcell)"
   libs="$(pkg-config --libs linkcell)"
+  gpu_ver="$(pkg-config --modversion linkcell-gpu)"
+  gpu_cflags="$(pkg-config --cflags linkcell-gpu)"
+  gpu_libs="$(pkg-config --libs linkcell-gpu)"
   echo "$label pkg-config: $ver"
   echo "$label cflags: $cflags"
   echo "$label libs: $libs"
   if [[ "$ver" != "$cargo_ver" ]]; then
     echo "$label pkg-config version $ver != Cargo.toml $cargo_ver"
+    exit 1
+  fi
+  if [[ "$gpu_ver" != "$cargo_ver" ]]; then
+    echo "$label GPU pkg-config version $gpu_ver != Cargo.toml $cargo_ver"
     exit 1
   fi
   case "$cflags" in
@@ -76,6 +84,20 @@ check_pkgconfig() {
     *-llinkcell*) ;;
     *)
       echo "$label Libs must contain -llinkcell: $libs"
+      exit 1
+      ;;
+  esac
+  case "$gpu_cflags" in
+    *-DLINKCELL_HAS_GPULITE=1*) ;;
+    *)
+      echo "$label GPU Cflags missing LINKCELL_HAS_GPULITE: $gpu_cflags"
+      exit 1
+      ;;
+  esac
+  case "$gpu_libs" in
+    *-llinkcell_gpu*) ;;
+    *)
+      echo "$label GPU Libs must contain -llinkcell_gpu: $gpu_libs"
       exit 1
       ;;
   esac
@@ -99,6 +121,11 @@ check_headers() {
     echo "missing $prefix/include/linkcell.hpp"
     exit 1
   fi
+  if [[ ! -f "$prefix/include/linkcell_gpu.h" \
+     || ! -f "$prefix/include/linkcell_gpu.hpp" ]]; then
+    echo "missing GPU headers under $prefix/include"
+    exit 1
+  fi
 }
 
 check_libs() {
@@ -113,6 +140,12 @@ check_libs() {
   if ! have_lib "$prefix" "liblinkcell.a" \
     && ! have_lib "$prefix" "linkcell.lib"; then
     echo "missing installed staticlib under $prefix"
+    find "$prefix" -name '*linkcell*' | head
+    exit 1
+  fi
+  if ! have_lib "$prefix" "liblinkcell_gpu.a" \
+    && ! have_lib "$prefix" "linkcell_gpu.lib"; then
+    echo "missing installed GPU static library under $prefix"
     find "$prefix" -name '*linkcell*' | head
     exit 1
   fi
@@ -186,6 +219,7 @@ fi
 echo "=== cmake consumer configure ==="
 cmake -S "$ROOT/tests/cmake-consumer" -B "$CMAKE_BUILD/find-consumer" \
   -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX" \
-  -DLINKCELL_EXAMPLE="$ROOT/examples/two_points.cpp"
+  -DLINKCELL_C_EXAMPLE="$ROOT/examples/two_points.c" \
+  -DLINKCELL_CPP_EXAMPLE="$ROOT/examples/two_points.cpp"
 
 echo "OK"
