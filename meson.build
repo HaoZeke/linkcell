@@ -144,9 +144,11 @@ if _gpu_on
   )
   linkcell_gpu_dep = declare_dependency(
     link_with: linkcell_gpu,
+    link_args: [linkcell_cargo[_link_idx].full_path()],
+    sources: linkcell_built_h,
     include_directories: include_directories('include'),
     compile_args: _gpu_args,
-    dependencies: [gpulite_dep])
+    dependencies: [gpulite_dep] + rust_sys)
   meson.override_dependency('linkcell-gpu', linkcell_gpu_dep)
   _gpu_deps += [linkcell_gpu_dep]
 endif

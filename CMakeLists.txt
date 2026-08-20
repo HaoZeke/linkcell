@@ -108,7 +108,6 @@ add_dependencies(linkcell linkcell_cargo)
 set_target_properties(linkcell PROPERTIES
   IMPORTED_LOCATION "${LINKCELL_SHARED}"
   INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/include"
-  INTERFACE_COMPILE_FEATURES "$<$<COMPILE_LANGUAGE:CXX>:cxx_std_17>"
 )
 if(WIN32)
   set_target_properties(linkcell PROPERTIES IMPORTED_IMPLIB "${LINKCELL_IMPLIB}")
@@ -129,9 +128,13 @@ add_dependencies(linkcell_static linkcell_cargo)
 set_target_properties(linkcell_static PROPERTIES
   IMPORTED_LOCATION "${LINKCELL_STATIC}"
   INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/include"
-  INTERFACE_COMPILE_FEATURES "$<$<COMPILE_LANGUAGE:CXX>:cxx_std_17>"
   INTERFACE_LINK_LIBRARIES "${_linkcell_sys}"
 )
+
+add_library(linkcell_cpp INTERFACE)
+add_library(linkcell::cpp ALIAS linkcell_cpp)
+target_link_libraries(linkcell_cpp INTERFACE linkcell::linkcell)
+target_compile_features(linkcell_cpp INTERFACE cxx_std_17)
 
 set(LINKCELL_GPU_SYSTEM_LIBS Threads::Threads)
 if(CMAKE_DL_LIBS)
