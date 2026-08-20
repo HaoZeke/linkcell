@@ -1,7 +1,11 @@
 #ifndef LINKCELL_HPP
 #define LINKCELL_HPP
 
-#if defined(__cplusplus) && __cplusplus < 201703L
+#if defined(_MSC_VER)
+#if !defined(_MSVC_LANG) || _MSVC_LANG < 201703L
+#error "linkcell.hpp requires C++17 or later"
+#endif
+#elif defined(__cplusplus) && __cplusplus < 201703L
 #error "linkcell.hpp requires C++17 or later"
 #endif
 

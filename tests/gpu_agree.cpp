@@ -8,7 +8,7 @@
 #include <vector>
 
 #ifdef LINKCELL_HAS_GPULITE
-#include <gpulite/gpulite.hpp>
+#include "gpulite_compat.hpp"
 #endif
 
 namespace {
