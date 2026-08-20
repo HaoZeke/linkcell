@@ -117,9 +117,9 @@ jobs:
         run: uvx maturin sdist --out dist
       - name: Test installed sdist
         run: |
-          uv venv .venv
-          uv pip install --python .venv/bin/python dist/*.tar.gz pytest numpy
-          .venv/bin/python -m pytest tests/python -q
+          uv venv --clear .sdist-venv
+          uv pip install --python .sdist-venv/bin/python dist/*.tar.gz pytest numpy
+          .sdist-venv/bin/python -m pytest tests/python -q
       - uses: actions/upload-artifact@v4
         with:
           name: sdist

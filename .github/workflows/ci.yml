@@ -109,8 +109,14 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install meson ninja
-      - run: meson setup build --prefix "$PWD/prefix" --libdir lib
+      - name: Meson setup
+        if: runner.os != 'Windows'
+        run: meson setup build --prefix "$PWD/prefix" --libdir lib
         shell: bash
+      - name: Meson setup
+        if: runner.os == 'Windows'
+        run: meson setup build --prefix "$env:GITHUB_WORKSPACE/prefix" --libdir lib
+        shell: pwsh
       - run: meson compile -C build
       - run: meson test -C build --print-errorlogs
       - run: meson install -C build
