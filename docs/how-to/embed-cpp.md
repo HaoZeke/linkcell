@@ -27,11 +27,12 @@ project(app LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 find_package(linkcell 0.3 REQUIRED)
 add_executable(app app.cpp)
-target_link_libraries(app PRIVATE linkcell::linkcell)
+target_link_libraries(app PRIVATE linkcell::cpp)
 ```
 
-`tests/cmake-consumer/` in this repository is that pattern against an
-installed prefix.
+`linkcell::cpp` links the C ABI and requires C++17. `linkcell::linkcell`
+has no C++ language requirement and remains usable by C-only projects.
+`tests/cmake-consumer/` exercises both patterns against an installed prefix.
 
 ## Call
 

@@ -94,12 +94,15 @@ cmake --install build
 
 ```cmake
 find_package(linkcell 0.3 REQUIRED)
-target_link_libraries(app PRIVATE linkcell::linkcell)
+target_link_libraries(c_app PRIVATE linkcell::linkcell)
+target_link_libraries(cpp_app PRIVATE linkcell::cpp)
 target_link_libraries(device_app PRIVATE linkcell::gpu)
 ```
 
 `LINKCELL_WITH_GPULITE=ON` builds `linkcell::gpu` and is the default.
-The same target names work in the build tree and from an installed prefix.
+`linkcell::cpp` carries the C++17 requirement; `linkcell::linkcell` stays
+valid in a C-only project. The same target names work in the build tree and
+from an installed prefix.
 
 ### pkg-config
 
