@@ -142,11 +142,13 @@ if _gpu_on
     cpp_args: _gpu_args,
     install: _install,
   )
-  _gpu_deps += [declare_dependency(
+  linkcell_gpu_dep = declare_dependency(
     link_with: linkcell_gpu,
     include_directories: include_directories('include'),
     compile_args: _gpu_args,
-    dependencies: [gpulite_dep])]
+    dependencies: [gpulite_dep])
+  meson.override_dependency('linkcell-gpu', linkcell_gpu_dep)
+  _gpu_deps += [linkcell_gpu_dep]
 endif
 
 linkcell_dep = declare_dependency(
