@@ -6,10 +6,6 @@ on:
     tags: ['v*']
   pull_request:
 
-# windows-latest omitted: meson/cmake wrap cargo via custom_target that
-# copies cargo-target/release/<lib> with POSIX path joins, and the
-# cdylib + cbindgen install layout is unix-shaped.
-
 jobs:
   fmt:
     runs-on: ubuntu-latest
@@ -65,7 +61,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
         crate:
           - name: default
             flags: ""
@@ -90,10 +86,17 @@ jobs:
       - run: cargo clippy --locked --all-targets ${{ matrix.crate.flags }} -- -D warnings
 
   meson:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    name: meson (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
       - uses: actions/cache@v4
         with:
           path: |
@@ -106,32 +109,54 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install meson ninja
-      - run: meson setup build
+      - run: meson setup build --prefix "${{ github.workspace }}/prefix" --libdir lib
       - run: meson compile -C build
       - run: meson test -C build --print-errorlogs
-      - run: meson install -C build --destdir "$PWD/destdir"
-      - name: pkg-config after meson install
+      - run: meson install -C build
+      - name: Installed headers and libraries
+        shell: bash
         run: |
-          prefix="$PWD/destdir/usr/local"
-          export PKG_CONFIG_PATH="$prefix/lib/x86_64-linux-gnu/pkgconfig:$prefix/lib/pkgconfig"
-          pkg-config --exists --print-errors linkcell
-          pkg-config --modversion linkcell
-          pkg-config --cflags --libs linkcell
+          prefix="${{ github.workspace }}/prefix"
           test -f "$prefix/include/linkcell.h"
           test -f "$prefix/include/linkcell.hpp"
           test -f "$prefix/include/linkcell_gpu.h"
           test -f "$prefix/include/linkcell_gpu.hpp"
-          test -f "$prefix/lib/x86_64-linux-gnu/liblinkcell.a" \
-            -o -f "$prefix/lib/liblinkcell.a"
-          test -f "$prefix/lib/x86_64-linux-gnu/liblinkcell.so" \
-            -o -f "$prefix/lib/liblinkcell.so" \
-            -o -f "$prefix/lib/liblinkcell.dylib"
+          case "$RUNNER_OS" in
+            Windows)
+              test -f "$prefix/bin/linkcell.dll"
+              test -f "$prefix/lib/linkcell.dll.lib"
+              test -f "$prefix/lib/linkcell.lib"
+              ;;
+            macOS)
+              test -f "$prefix/lib/liblinkcell.dylib"
+              test -f "$prefix/lib/liblinkcell.a"
+              ;;
+            Linux)
+              test -f "$prefix/lib/liblinkcell.so"
+              test -f "$prefix/lib/liblinkcell.a"
+              ;;
+          esac
+      - name: pkg-config after meson install
+        if: runner.os != 'Windows'
+        run: |
+          prefix="${{ github.workspace }}/prefix"
+          export PKG_CONFIG_PATH="$prefix/lib/pkgconfig"
+          pkg-config --exists --print-errors linkcell
+          pkg-config --modversion linkcell
+          pkg-config --cflags --libs linkcell
 
   cmake:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    name: cmake (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
       - uses: actions/cache@v4
         with:
           path: |
@@ -141,23 +166,41 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
       - run: cmake -S . -B build -DCMAKE_INSTALL_PREFIX="$PWD/prefix"
-      - run: cmake --build build
-      - run: ctest --test-dir build --output-on-failure
-      - run: cmake --install build
-      - name: find_package and pkg-config after cmake install
+      - run: cmake --build build --config Release
+      - run: ctest --test-dir build -C Release --output-on-failure
+      - run: cmake --install build --config Release
+      - name: find_package after cmake install
+        shell: bash
         run: |
           test -f prefix/include/linkcell.h
-          test -f prefix/lib/liblinkcell.a
-          test -f prefix/lib/liblinkcell.so -o -f prefix/lib/liblinkcell.dylib
-          test -f prefix/lib/pkgconfig/linkcell.pc
           test -f prefix/lib/cmake/linkcell/linkcellConfig.cmake
-          export PKG_CONFIG_PATH="$PWD/prefix/lib/pkgconfig"
-          pkg-config --exists --print-errors linkcell
-          pkg-config --modversion linkcell
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            test -f prefix/bin/linkcell.dll
+            test -f prefix/lib/linkcell.dll.lib
+            test -f prefix/lib/linkcell.lib
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            test -f prefix/lib/liblinkcell.dylib
+            test -f prefix/lib/liblinkcell.a
+          else
+            test -f prefix/lib/liblinkcell.so
+            test -f prefix/lib/liblinkcell.a
+          fi
           cmake -S tests/cmake-consumer -B find-build \
             -DCMAKE_PREFIX_PATH="$PWD/prefix" \
             -DLINKCELL_EXAMPLE="$PWD/examples/two_points.cpp"
-          cmake --build find-build
-          export LD_LIBRARY_PATH="$PWD/prefix/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-          export DYLD_LIBRARY_PATH="$PWD/prefix/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
-          ./find-build/find_lc
+          cmake --build find-build --config Release
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            export PATH="$PWD/prefix/bin:$PATH"
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            export DYLD_LIBRARY_PATH="$PWD/prefix/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
+          else
+            export LD_LIBRARY_PATH="$PWD/prefix/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          fi
+          ctest --test-dir find-build -C Release --output-on-failure
+      - name: pkg-config after cmake install
+        if: runner.os != 'Windows'
+        run: |
+          test -f prefix/lib/pkgconfig/linkcell.pc
+          export PKG_CONFIG_PATH="$PWD/prefix/lib/pkgconfig"
+          pkg-config --exists --print-errors linkcell
+          pkg-config --modversion linkcell

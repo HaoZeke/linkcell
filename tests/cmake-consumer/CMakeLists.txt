@@ -10,3 +10,6 @@ endif()
 
 add_executable(find_lc "${LINKCELL_EXAMPLE}")
 target_link_libraries(find_lc PRIVATE linkcell::linkcell)
+
+enable_testing()
+add_test(NAME installed-linkcell-consumer COMMAND find_lc)
