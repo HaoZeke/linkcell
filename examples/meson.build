@@ -26,7 +26,7 @@ if _gpu_on
   gpu_agree = executable(
     'gpu_agree',
     meson.project_source_root() / 'tests/gpu_agree.cpp',
-    dependencies: linkcell_dep,
+    dependencies: linkcell_gpu_dep,
     include_directories: include_directories('../src/gpu'),
     build_rpath: meson.project_build_root(),
   )
