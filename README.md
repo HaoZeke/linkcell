@@ -26,9 +26,10 @@ Rust:
 cargo add linkcell
 ```
 
-C and C++ consumers take the `staticlib` (`--features capi`, on by default)
-plus `include/linkcell.h` or `include/linkcell.hpp`. Meson, CMake, and
-pkg-config all install that archive and those headers.
+C and C++ consumers include `linkcell.h` or `linkcell.hpp` and link the
+installed library. Meson, CMake, and pkg-config install both shared and
+static CPU libraries. The device API is a separate static library with
+`linkcell_gpu.h` / `linkcell_gpu.hpp`.
 
 Python takes the same search through DLPack (dlpk). Any `__dlpack__()`
 object (numpy, torch, jax, cupy) is a valid `xyz` / `cell`, on any
@@ -70,11 +71,18 @@ depth = 1
 
 [provide]
 linkcell = linkcell_dep
+linkcell-gpu = linkcell_gpu_dep
 ```
 
 ```meson
 linkcell_dep = dependency('linkcell', fallback: ['linkcell', 'linkcell_dep'])
+linkcell_gpu_dep = dependency(
+  'linkcell-gpu',
+  fallback: ['linkcell', 'linkcell_gpu_dep'],
+)
 ```
+
+`with_gpulite` controls the device target and defaults to `auto`.
 
 ### CMake
 
@@ -87,18 +95,22 @@ cmake --install build
 ```cmake
 find_package(linkcell 0.3 REQUIRED)
 target_link_libraries(app PRIVATE linkcell::linkcell)
+target_link_libraries(device_app PRIVATE linkcell::gpu)
 ```
 
-In the same build tree the target is `linkcell::linkcell`.
+`LINKCELL_WITH_GPULITE=ON` builds `linkcell::gpu` and is the default.
+The same target names work in the build tree and from an installed prefix.
 
 ### pkg-config
 
 ```
 pkg-config --cflags --libs linkcell
+pkg-config --cflags --libs linkcell-gpu
 ```
 
-Both Meson and CMake write `linkcell.pc` (Libs includes the Rust
-sysroot: pthread, dl, m on Linux).
+Both Meson and CMake write `linkcell.pc` and, when the device target is
+built, `linkcell-gpu.pc`. Use `pkg-config --static` when selecting the
+CPU static archive and its private system libraries.
 
 ## Rust
 

@@ -1,8 +1,8 @@
 # Embed linkcell from C++
 
 `include/linkcell.hpp` is a C++17 RAII header over `linkcell.h`. It
-does not add a second library. Link the same `staticlib` a C consumer
-links.
+does not add a second CPU library. Link the same package target a C
+consumer links.
 
 `linkcell::knearest` returns an owning packed `Neighbours`.
 `knearest_into` writes a caller-owned `int *` and takes `out_len`,
@@ -45,9 +45,10 @@ int j = nn.neighbour(0, 0);
 double r2 = nn.dist2(0, 0);
 ```
 
-Device k-nearest (`linkcell_gpu.hpp`, meson `with_gpulite`) takes
-device pointers and writes the same packed buffer. A device-packed
-cell (3 / 9 / 12 doubles) is inverted on device:
+Device k-nearest (`linkcell_gpu.hpp`) takes device pointers and writes
+the same packed buffer. Link `linkcell_gpu_dep` in Meson,
+`linkcell::gpu` in CMake, or `linkcell-gpu` with pkg-config. A
+device-packed cell (3 / 9 / 12 doubles) is inverted on device:
 
 ```cpp
 #include "linkcell_gpu.hpp"
@@ -58,8 +59,9 @@ ws.knearest_into_many_dcell(xyz_dev, n, 1, cell_dev, 9, k, out_dev,
                             n * k);
 ```
 
-`linkcell::gpu::available()` is false when the library was built
-without gpulite or the CUDA driver is missing.
+`linkcell::gpu::available()` is false when a CUDA driver or NVRTC
+cannot be loaded. gpulite loads both at runtime; no CUDA SDK is needed
+to build the target.
 
 A general parallelepiped is `linkcell::Cell::from_vectors(a, b, c,
 origin)`. `Cell::raw()` is the `lc_cell` the ABI consumes.

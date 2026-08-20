@@ -3,7 +3,7 @@
 Header: `include/linkcell.h`. Prefix `lc_`. Caller owns every
 buffer. C++ (`include/linkcell.hpp`) is a header-only wrap of these
 entry points. Device searches are `lc_gpu_*` in
-`include/linkcell_gpu.h` (meson `with_gpulite`).
+`include/linkcell_gpu.h`; link the package's `linkcell-gpu` target.
 
 ## Cell
 

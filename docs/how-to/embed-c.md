@@ -1,9 +1,10 @@
 # Embed linkcell from C
 
-Link the installed `staticlib` and include `linkcell.h`. The C ABI is
+Link the installed CPU library and include `linkcell.h`. The C ABI is
 the hourglass waist; every other language wraps `lc_*`. Python wraps
 it with DLPack (dlpk); see [Embed from Python](embed-python.md).
-Device searches use `lc_gpu_*` (`include/linkcell_gpu.h`).
+Device searches use `lc_gpu_*` (`include/linkcell_gpu.h`) from the
+separate GPU package target.
 
 `lc_knearest` takes packed `double` xyz (`n` triples), `size_t n`,
 `size_t k`, and a caller-owned `int` buffer of length `n * k`. Unused
@@ -35,6 +36,11 @@ executable('app', 'app.c', dependencies: linkcell_dep)
 `linkcell_dep` already carries the Rust sysroot (pthread, dl, m on
 Linux).
 
+For the device API, request `linkcell-gpu` with fallback
+`['linkcell', 'linkcell_gpu_dep']`. The dependency defines
+`LINKCELL_HAS_GPULITE` and links its C++ implementation, so enable C++
+in a C-only project that uses `lc_gpu_*`.
+
 ## CMake
 
 After `cmake --install` into `$PREFIX`:
@@ -46,6 +52,10 @@ find_package(linkcell 0.3 REQUIRED)
 add_executable(app app.c)
 target_link_libraries(app PRIVATE linkcell::linkcell)
 ```
+
+For `lc_gpu_*`, declare `project(app LANGUAGES C CXX)` and link
+`linkcell::gpu`. `LINKCELL_WITH_GPULITE` controls that target and is on
+by default.
 
 ```
 cmake -S . -B build -DCMAKE_PREFIX_PATH=$PREFIX

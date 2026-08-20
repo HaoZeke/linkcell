@@ -16,8 +16,9 @@ extern "C" {
  * xyz and out_nn are CUDA device pointers. simbox is a host lc_cell.
  * lc_gpu_knearest_many_dcell takes a device-packed cell (3, 9, or 12
  * doubles) and inverts H on device.
- * Built when meson with_gpulite is on; otherwise lc_gpu_available is 0
- * and the other entry points fail.
+ * Link the package's GPU target: linkcell::gpu, linkcell_gpu_dep, or
+ * linkcell-gpu.pc. The target uses gpulite and needs no CUDA SDK at build
+ * time. lc_gpu_available is 0 when a CUDA driver or NVRTC cannot be loaded.
  *
  * Distinct workspaces may run concurrently. Each workspace owns one
  * CUDA stream (lc_gpu_queue). Call lc_gpu_wait before reading device

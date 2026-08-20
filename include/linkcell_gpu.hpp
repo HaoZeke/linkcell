@@ -16,7 +16,7 @@
  *  doubles) inverted on device. General parallelepiped. `k <= 16`.
  *
  *  The workspace keeps the bin arrays across calls (grow on demand).
- *  Built only when the meson `with_gpulite` feature is on.
+ *  Link `linkcell::gpu`, `linkcell_gpu_dep`, or `linkcell-gpu.pc`.
  */
 
 namespace linkcell {
