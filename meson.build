@@ -134,14 +134,27 @@ _gpu_args = []
 _gpu_src = []
 if _gpu_on
   _gpu_args += ['-DLINKCELL_HAS_GPULITE=1']
-  linkcell_gpu = static_library(
-    'linkcell_gpu',
-    ['src/gpu/knearest.cpp', 'src/gpu/capi.cpp'],
-    include_directories: include_directories('include'),
-    dependencies: [gpulite_dep],
-    cpp_args: _gpu_args,
-    install: _install,
-  )
+  if host_machine.system() == 'windows'
+    linkcell_gpu = static_library(
+      'linkcell_gpu',
+      ['src/gpu/knearest.cpp', 'src/gpu/capi.cpp'],
+      include_directories: include_directories('include'),
+      dependencies: [gpulite_dep],
+      cpp_args: _gpu_args,
+      name_prefix: '',
+      name_suffix: 'lib',
+      install: _install,
+    )
+  else
+    linkcell_gpu = static_library(
+      'linkcell_gpu',
+      ['src/gpu/knearest.cpp', 'src/gpu/capi.cpp'],
+      include_directories: include_directories('include'),
+      dependencies: [gpulite_dep],
+      cpp_args: _gpu_args,
+      install: _install,
+    )
+  endif
   linkcell_gpu_dep = declare_dependency(
     link_with: linkcell_gpu,
     link_args: [linkcell_cargo[_link_idx].full_path()],
