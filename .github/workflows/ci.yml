@@ -133,14 +133,17 @@ jobs:
               test -f "$prefix/bin/linkcell.dll"
               test -f "$prefix/lib/linkcell.dll.lib"
               test -f "$prefix/lib/linkcell.lib"
+              test -f "$prefix/lib/linkcell_gpu.lib"
               ;;
             macOS)
               test -f "$prefix/lib/liblinkcell.dylib"
               test -f "$prefix/lib/liblinkcell.a"
+              test -f "$prefix/lib/liblinkcell_gpu.a"
               ;;
             Linux)
               test -f "$prefix/lib/liblinkcell.so"
               test -f "$prefix/lib/liblinkcell.a"
+              test -f "$prefix/lib/liblinkcell_gpu.a"
               ;;
           esac
       - name: pkg-config after meson install
@@ -151,6 +154,11 @@ jobs:
           pkg-config --exists --print-errors linkcell
           pkg-config --modversion linkcell
           pkg-config --cflags --libs linkcell
+          pkg-config --exists --print-errors linkcell-gpu
+          pkg-config --modversion linkcell-gpu
+          c++ -std=c++17 tests/cmake-consumer/gpu.cpp \
+            $(pkg-config --cflags --libs linkcell-gpu) \
+            -o build/installed-gpu-consumer
 
   cmake:
     strategy:
@@ -186,16 +194,20 @@ jobs:
             test -f prefix/bin/linkcell.dll
             test -f prefix/lib/linkcell.dll.lib
             test -f prefix/lib/linkcell.lib
+            test -f prefix/lib/linkcell_gpu.lib
           elif [[ "$RUNNER_OS" == "macOS" ]]; then
             test -f prefix/lib/liblinkcell.dylib
             test -f prefix/lib/liblinkcell.a
+            test -f prefix/lib/liblinkcell_gpu.a
           else
             test -f prefix/lib/liblinkcell.so
             test -f prefix/lib/liblinkcell.a
+            test -f prefix/lib/liblinkcell_gpu.a
           fi
           cmake -S tests/cmake-consumer -B find-build \
             -DCMAKE_PREFIX_PATH="$PWD/prefix" \
-            -DLINKCELL_EXAMPLE="$PWD/examples/two_points.cpp"
+            -DLINKCELL_C_EXAMPLE="$PWD/examples/two_points.c" \
+            -DLINKCELL_CPP_EXAMPLE="$PWD/examples/two_points.cpp"
           cmake --build find-build --config Release
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             export PATH="$PWD/prefix/bin:$PATH"
