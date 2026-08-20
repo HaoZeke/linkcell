@@ -119,7 +119,8 @@ jobs:
         run: |
           uv venv --clear .sdist-venv
           uv pip install --python .sdist-venv/bin/python dist/*.tar.gz pytest numpy
-          .sdist-venv/bin/python -m pytest tests/python -q
+          .sdist-venv/bin/python -I -c "import linkcell; print(linkcell.__file__)"
+          .sdist-venv/bin/python -I -m pytest --import-mode=importlib "$PWD/tests/python" -q
       - uses: actions/upload-artifact@v4
         with:
           name: sdist
