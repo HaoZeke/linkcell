@@ -1,0 +1,12 @@
+prefix=@CMAKE_INSTALL_PREFIX@
+exec_prefix=${prefix}
+libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
+includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
+
+Name: linkcell-gpu
+Description: Device periodic k-nearest neighbour search
+Version: @PROJECT_VERSION@
+URL: https://github.com/d-SEAMS/linkcell
+Requires: linkcell = @PROJECT_VERSION@
+Libs: -L${libdir} -llinkcell_gpu @LINKCELL_GPU_PKG_LIBS@
+Cflags: -I${includedir} -DLINKCELL_HAS_GPULITE=1

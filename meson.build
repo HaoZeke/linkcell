@@ -160,8 +160,10 @@ linkcell_dep = declare_dependency(
 meson.override_dependency('linkcell', linkcell_dep)
 
 if _install
-  install_headers('include/linkcell.h', 'include/linkcell.hpp',
-                  'include/linkcell_gpu.h', 'include/linkcell_gpu.hpp')
+  install_headers('include/linkcell.h', 'include/linkcell.hpp')
+  if _gpu_on
+    install_headers('include/linkcell_gpu.h', 'include/linkcell_gpu.hpp')
+  endif
   pkg = import('pkgconfig')
   pkg.generate(
     name: 'linkcell',
@@ -175,6 +177,19 @@ if _install
     libraries_private: rust_sys,
     subdirs: '.',
   )
+  if _gpu_on
+    pkg.generate(
+      name: 'linkcell-gpu',
+      filebase: 'linkcell-gpu',
+      description: 'Device periodic k-nearest neighbour search',
+      version: meson.project_version(),
+      url: 'https://github.com/d-SEAMS/linkcell',
+      requires: ['linkcell'],
+      libraries: ['-L${libdir}', '-llinkcell_gpu'] + rust_sys,
+      extra_cflags: ['-DLINKCELL_HAS_GPULITE=1'],
+      subdirs: '.',
+    )
+  endif
 endif
 
 summary({

@@ -27,6 +27,7 @@ find_program(CARGO_EXECUTABLE cargo REQUIRED)
 
 option(LINKCELL_BUILD_EXAMPLES "Build C and C++ example programs" ON)
 option(LINKCELL_INSTALL "Install headers, libraries, pkg-config, and CMake package" ON)
+option(LINKCELL_WITH_GPULITE "Build the device k-nearest C and C++ APIs" ON)
 
 if(WIN32)
   set(LINKCELL_SHARED_NAME linkcell.dll)
@@ -36,6 +37,8 @@ else()
   set(LINKCELL_SHARED_NAME "${CMAKE_SHARED_LIBRARY_PREFIX}linkcell${CMAKE_SHARED_LIBRARY_SUFFIX}")
   set(LINKCELL_STATIC_NAME "${CMAKE_STATIC_LIBRARY_PREFIX}linkcell${CMAKE_STATIC_LIBRARY_SUFFIX}")
 endif()
+set(LINKCELL_GPU_STATIC_NAME
+  "${CMAKE_STATIC_LIBRARY_PREFIX}linkcell_gpu${CMAKE_STATIC_LIBRARY_SUFFIX}")
 
 set(LINKCELL_CARGO_DIR "${CMAKE_CURRENT_BINARY_DIR}/cargo-target")
 string(TOLOWER "${CMAKE_BUILD_TYPE}" _linkcell_build_type)
@@ -105,7 +108,7 @@ add_dependencies(linkcell linkcell_cargo)
 set_target_properties(linkcell PROPERTIES
   IMPORTED_LOCATION "${LINKCELL_SHARED}"
   INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/include"
-  INTERFACE_COMPILE_FEATURES cxx_std_17
+  INTERFACE_COMPILE_FEATURES "$<$<COMPILE_LANGUAGE:CXX>:cxx_std_17>"
 )
 if(WIN32)
   set_target_properties(linkcell PROPERTIES IMPORTED_IMPLIB "${LINKCELL_IMPLIB}")
@@ -126,9 +129,35 @@ add_dependencies(linkcell_static linkcell_cargo)
 set_target_properties(linkcell_static PROPERTIES
   IMPORTED_LOCATION "${LINKCELL_STATIC}"
   INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/include"
-  INTERFACE_COMPILE_FEATURES cxx_std_17
+  INTERFACE_COMPILE_FEATURES "$<$<COMPILE_LANGUAGE:CXX>:cxx_std_17>"
   INTERFACE_LINK_LIBRARIES "${_linkcell_sys}"
 )
+
+set(LINKCELL_GPU_SYSTEM_LIBS Threads::Threads)
+if(CMAKE_DL_LIBS)
+  list(APPEND LINKCELL_GPU_SYSTEM_LIBS ${CMAKE_DL_LIBS})
+endif()
+
+if(LINKCELL_WITH_GPULITE)
+  add_library(linkcell_gpu STATIC
+    src/gpu/knearest.cpp
+    src/gpu/capi.cpp
+  )
+  add_library(linkcell::gpu ALIAS linkcell_gpu)
+  target_include_directories(linkcell_gpu
+    PUBLIC
+      "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+      "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+    PRIVATE
+      "${CMAKE_CURRENT_SOURCE_DIR}/third_party/gpulite"
+  )
+  target_compile_definitions(linkcell_gpu PUBLIC LINKCELL_HAS_GPULITE=1)
+  target_compile_features(linkcell_gpu PUBLIC cxx_std_17)
+  target_link_libraries(linkcell_gpu PUBLIC
+    linkcell::linkcell
+    ${LINKCELL_GPU_SYSTEM_LIBS}
+  )
+endif()
 
 if(LINKCELL_BUILD_EXAMPLES)
   add_executable(two_points examples/two_points.c)
@@ -152,10 +181,13 @@ endif()
 if(LINKCELL_INSTALL)
   if(UNIX AND NOT APPLE)
     set(LINKCELL_PKG_LIBS_PRIVATE "-ldl -lpthread -lm")
+    set(LINKCELL_GPU_PKG_LIBS "-ldl -lpthread")
   elseif(APPLE)
     set(LINKCELL_PKG_LIBS_PRIVATE "-lpthread -lm")
+    set(LINKCELL_GPU_PKG_LIBS "-lpthread")
   else()
     set(LINKCELL_PKG_LIBS_PRIVATE "")
+    set(LINKCELL_GPU_PKG_LIBS "")
   endif()
 
   configure_file(
@@ -163,6 +195,13 @@ if(LINKCELL_INSTALL)
     "${CMAKE_CURRENT_BINARY_DIR}/linkcell.pc"
     @ONLY
   )
+  if(LINKCELL_WITH_GPULITE)
+    configure_file(
+      "${CMAKE_CURRENT_SOURCE_DIR}/cmake/linkcell-gpu.pc.in"
+      "${CMAKE_CURRENT_BINARY_DIR}/linkcell-gpu.pc"
+      @ONLY
+    )
+  endif()
   configure_package_config_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/linkcellConfig.cmake.in"
     "${CMAKE_CURRENT_BINARY_DIR}/linkcellConfig.cmake"
@@ -181,16 +220,29 @@ if(LINKCELL_INSTALL)
     install(FILES "${LINKCELL_SHARED}" DESTINATION "${CMAKE_INSTALL_LIBDIR}")
   endif()
   install(FILES "${LINKCELL_STATIC}" DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+  if(LINKCELL_WITH_GPULITE)
+    install(TARGETS linkcell_gpu ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+  endif()
   install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/include/linkcell.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/linkcell.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/linkcell_gpu.h"
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/linkcell_gpu.hpp"
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
   )
+  if(LINKCELL_WITH_GPULITE)
+    install(FILES
+      "${CMAKE_CURRENT_SOURCE_DIR}/include/linkcell_gpu.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/include/linkcell_gpu.hpp"
+      DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+    )
+  endif()
   install(FILES "${CMAKE_CURRENT_BINARY_DIR}/linkcell.pc"
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig"
   )
+  if(LINKCELL_WITH_GPULITE)
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/linkcell-gpu.pc"
+      DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig"
+    )
+  endif()
   install(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/linkcellConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/linkcellConfigVersion.cmake"

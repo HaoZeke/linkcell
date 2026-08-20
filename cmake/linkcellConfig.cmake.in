@@ -1,5 +1,8 @@
 @PACKAGE_INIT@
 
+include(CMakeFindDependencyMacro)
+find_dependency(Threads)
+
 set_and_check(LINKCELL_INCLUDE_DIR "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_INCLUDEDIR@")
 
 if(WIN32)
@@ -14,11 +17,23 @@ if(NOT TARGET linkcell::linkcell)
   set_target_properties(linkcell::linkcell PROPERTIES
     IMPORTED_LOCATION "${LINKCELL_LIBRARY}"
     INTERFACE_INCLUDE_DIRECTORIES "${LINKCELL_INCLUDE_DIR}"
-    INTERFACE_COMPILE_FEATURES cxx_std_17)
+    INTERFACE_COMPILE_FEATURES "$<$<COMPILE_LANGUAGE:CXX>:cxx_std_17>")
   if(WIN32)
     set_target_properties(linkcell::linkcell PROPERTIES
       IMPORTED_IMPLIB "${LINKCELL_IMPLIB}")
   endif()
+endif()
+
+if(@LINKCELL_WITH_GPULITE@ AND NOT TARGET linkcell::gpu)
+  set_and_check(LINKCELL_GPU_LIBRARY
+    "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_LIBDIR@/@LINKCELL_GPU_STATIC_NAME@")
+  add_library(linkcell::gpu STATIC IMPORTED)
+  set_target_properties(linkcell::gpu PROPERTIES
+    IMPORTED_LOCATION "${LINKCELL_GPU_LIBRARY}"
+    INTERFACE_INCLUDE_DIRECTORIES "${LINKCELL_INCLUDE_DIR}"
+    INTERFACE_COMPILE_DEFINITIONS LINKCELL_HAS_GPULITE=1
+    INTERFACE_COMPILE_FEATURES cxx_std_17
+    INTERFACE_LINK_LIBRARIES "linkcell::linkcell;@LINKCELL_GPU_SYSTEM_LIBS@")
 endif()
 
 check_required_components(linkcell)
