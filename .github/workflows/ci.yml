@@ -109,14 +109,15 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install meson ninja
-      - run: meson setup build --prefix "${{ github.workspace }}/prefix" --libdir lib
+      - run: meson setup build --prefix "$PWD/prefix" --libdir lib
+        shell: bash
       - run: meson compile -C build
       - run: meson test -C build --print-errorlogs
       - run: meson install -C build
       - name: Installed headers and libraries
         shell: bash
         run: |
-          prefix="${{ github.workspace }}/prefix"
+          prefix="$PWD/prefix"
           test -f "$prefix/include/linkcell.h"
           test -f "$prefix/include/linkcell.hpp"
           test -f "$prefix/include/linkcell_gpu.h"
@@ -139,7 +140,7 @@ jobs:
       - name: pkg-config after meson install
         if: runner.os != 'Windows'
         run: |
-          prefix="${{ github.workspace }}/prefix"
+          prefix="$PWD/prefix"
           export PKG_CONFIG_PATH="$prefix/lib/pkgconfig"
           pkg-config --exists --print-errors linkcell
           pkg-config --modversion linkcell
@@ -166,6 +167,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
       - run: cmake -S . -B build -DCMAKE_INSTALL_PREFIX="$PWD/prefix"
+        shell: bash
       - run: cmake --build build --config Release
       - run: ctest --test-dir build -C Release --output-on-failure
       - run: cmake --install build --config Release
